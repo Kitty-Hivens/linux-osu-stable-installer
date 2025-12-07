@@ -37,7 +37,7 @@ The script utilizes `yad` (Yet Another Dialog) to provide a graphical configurat
 
 ### 1. Clone Repository
 ```bash
-git clone [https://github.com/Kitty-Hivens/linux-osu-stable-installer.git](https://github.com/Kitty-Hivens/linux-osu-stable-installer.git)
+git clone https://github.com/Kitty-Hivens/linux-osu-stable-installer.git
 cd linux-osu-stable-installer
 ````
 
