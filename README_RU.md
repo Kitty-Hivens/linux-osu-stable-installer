@@ -37,7 +37,7 @@
 
 ### 1. Клонирование репозитория
 ```bash
-git clone [https://github.com/Kitty-Hivens/linux-osu-stable-installer.git](https://github.com/Kitty-Hivens/linux-osu-stable-installer.git)
+git clone https://github.com/Kitty-Hivens/linux-osu-stable-installer.git
 cd linux-osu-stable-installer
 ````
 
