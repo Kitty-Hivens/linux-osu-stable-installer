@@ -44,8 +44,8 @@ cd linux-osu-stable-installer
 ### 2\. Execute Installer
 
 ```bash
-chmod +x osu!install.sh
-./osu!install.sh
+chmod +x install.sh
+./install.sh
 ```
 
 > **Security Note:** The script requests root privileges (via `pkexec`) **only** to install missing system packages (drivers, `yad`, `wine`) via your system's package manager. The game itself is installed in the user's home directory.
