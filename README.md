@@ -30,6 +30,7 @@ The script utilizes `yad` (Yet Another Dialog) to provide a graphical configurat
 ## System Requirements
 
 * **OS:** Linux (Arch, Debian, Fedora, Void, or derivatives). NixOS is partially supported (requires manual `yad` installation).
+> **NixOS Users:** Please use the [native fork](https://github.com/afanetd/linux-osu-stable-installer-nixos) by **afanetd** for proper system integration.
 * **Dependencies:** `curl`, `unzip`, `winetricks`, `yad`. (Installed automatically on supported systems).
 * **Wine:** `wine-staging` is recommended for performance, though stable branches are supported.
 
