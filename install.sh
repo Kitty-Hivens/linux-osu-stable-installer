@@ -397,6 +397,25 @@ MimeType=application/x-osu-beatmap;application/x-osu-skin;application/x-osu-repl
 NoDisplay=true
 EOF
 
+mkdir -p "$HOME/.local/share/mime/packages"
+cat > "$HOME/.local/share/mime/packages/osu-file-types.xml" << EOF
+<?xml version="1.0"?>
+<mime-info xmlns='http://www.freedesktop.org/standards/shared-mime-info'>
+  <mime-type type="application/x-osu-beatmap">
+    <comment>osu! beatmap</comment>
+    <glob pattern="*.osz"/>
+  </mime-type>
+  <mime-type type="application/x-osu-skin">
+    <comment>osu! skin</comment>
+    <glob pattern="*.osk"/>
+  </mime-type>
+  <mime-type type="application/x-osu-replay">
+    <comment>osu! replay</comment>
+    <glob pattern="*.osr"/>
+  </mime-type>
+</mime-info>
+EOF
+
 update-mime-database "$HOME/.local/share/mime" 2>/dev/null || true
 xdg-mime default osu-importer.desktop application/x-osu-beatmap
 xdg-mime default osu-importer.desktop application/x-osu-skin
