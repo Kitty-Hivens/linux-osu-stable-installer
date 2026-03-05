@@ -1,0 +1,395 @@
+#!/bin/bash
+# Module: osu! Download, RPC, System Integration, and Symlinks
+
+install_discord_rpc() {
+    log_info "Setting up Discord RPC Bridge..."
+
+    local RPC_SCRIPT=$(cat << 'EOF'
+        set +e  # FIX: Disable set -e locally — Wine/wineserver commands return non-zero on "already stopped" etc.
+
+        echo "Stopping and cleaning old bridge (if any)..."
+        WINEPREFIX="$WINE_PREFIX" WAYLAND_DISPLAY="" "$WINE_BIN" net stop rpc-bridge 2>/dev/null
+        WINEPREFIX="$WINE_PREFIX" WAYLAND_DISPLAY="" "$WINE_BIN" taskkill /IM bridge.exe /F 2>/dev/null
+        rm -f "$WINE_PREFIX/drive_c/windows/bridge.exe"
+
+        echo "Downloading RPC Bridge..."
+        TEMP_DIR="$WINE_PREFIX/drive_c/windows/temp_bridge"
+        mkdir -p "$TEMP_DIR"
+
+        if ! curl -L -s --fail -o "$TEMP_DIR/bridge.zip" \
+            "https://github.com/EnderIce2/rpc-bridge/releases/latest/download/bridge.zip"; then
+            echo "[ERROR] Failed to download Discord RPC Bridge. Skipping."
+            rm -rf "$TEMP_DIR"
+            set -e
+            exit 0
+        fi
+
+        unzip -o -q "$TEMP_DIR/bridge.zip" -d "$TEMP_DIR"
+        BRIDGE_EXE=$(find "$TEMP_DIR" -name "bridge.exe" | head -n 1)
+
+        if [ -n "$BRIDGE_EXE" ]; then
+            echo "Installing bridge..."
+            WINEPREFIX="$WINE_PREFIX" WAYLAND_DISPLAY="" "$WINE_BIN" "$BRIDGE_EXE" --install
+            echo "Discord RPC Bridge installed successfully."
+        else
+            echo "[ERROR] bridge.exe not found in archive. Skipping."
+        fi
+
+        rm -rf "$TEMP_DIR"
+        set -e
+EOF
+)
+
+    if [ "$SILENT_MODE" = false ]; then
+        ( eval "$RPC_SCRIPT" ) 2>&1 | yad --progress --pulsate --auto-close \
+            --title="Discord RPC" --text="Installing Rich Presence..." --center
+    else
+        eval "$RPC_SCRIPT"
+    fi
+}
+
+install_osu_client() {
+    log_info "Checking for existing osu! installation..."
+
+    local WINE_USER
+    WINE_USER=$(ls -1 "$WINE_PREFIX/drive_c/users/" 2>/dev/null | grep -v "Public" | head -n 1)
+    local EXPECTED_PATH="$WINE_PREFIX/drive_c/users/$WINE_USER/AppData/Local/osu!/osu!.exe"
+
+    TARGET_OSU_EXE="$EXPECTED_PATH"
+
+    if [ ! -f "$TARGET_OSU_EXE" ]; then
+        TARGET_OSU_EXE=$(find "$WINE_PREFIX" -name "osu!.exe" 2>/dev/null | head -n 1)
+    fi
+
+    if [ -z "$TARGET_OSU_EXE" ] || [ ! -f "$TARGET_OSU_EXE" ]; then
+        log_info "Downloading osu! installer..."
+        curl -L -o "$WINE_PREFIX/osu!install.exe" "https://m1.ppy.sh/r/osu!install.exe"
+
+        if [ "$SILENT_MODE" = false ]; then
+            yad --title="osu! Setup" \
+                --text="<b>READ CAREFULLY:</b>\n\nosu! will now download its files.\nDue to Wine Mono, the installer window might crash or vanish at 100%.\n\n<b>DO NOT PANIC!</b> The script will catch this and launch the actual game.\nWait until you see the <b>osu! main menu</b>, then close it normally." \
+                --button="Understood:0" --center --width=450
+        else
+            echo -e "\n[ACTION REQUIRED] osu! is downloading its files."
+            echo "Because of Wine Mono, the updater might crash and restart automatically."
+            echo "Please wait for it to reach the main menu, then close it completely."
+        fi
+
+        log_info "Launching osu! installer..."
+        env WINENTSYNC=0 WINEFSYNC=0 WINEESYNC=0 WINEWAYLAND=0 WAYLAND_DISPLAY="" \
+            WINEPREFIX="$WINE_PREFIX" LC_ALL=en_US.UTF-8 \
+            "$WINE_BIN" "$WINE_PREFIX/osu!install.exe" &
+        local INSTALLER_PID=$!
+
+        log_info "Waiting for osu!.exe to be extracted to AppData..."
+        local TIMEOUT=0
+        while [ ! -f "$EXPECTED_PATH" ]; do
+            sleep 2
+            TIMEOUT=$((TIMEOUT + 2))
+            if [ $TIMEOUT -ge 180 ]; then
+                log_warn "Extraction timeout. Checking for osu!.exe anyway..."
+                break
+            fi
+        done
+
+        wait $INSTALLER_PID 2>/dev/null || true  # Mono will assert/crash here — that's expected
+
+        if [ -f "$EXPECTED_PATH" ]; then
+            log_info "Extraction successful. Launching the game for first-time setup..."
+            TARGET_OSU_EXE="$EXPECTED_PATH"
+            env WINENTSYNC=0 WINEFSYNC=0 WINEESYNC=0 WINEWAYLAND=0 WAYLAND_DISPLAY="" \
+                WINEPREFIX="$WINE_PREFIX" LC_ALL=en_US.UTF-8 \
+                "$WINE_BIN" "$TARGET_OSU_EXE"
+        else
+            notify_error "osu!.exe not found after installation. The updater may have completely failed."
+        fi
+
+        log_info "Shutting down Wine prefix safely..."
+        env WINEPREFIX="$WINE_PREFIX" "$WINE_BIN" boot --end-session 2>/dev/null || true
+        env WINEPREFIX="$WINE_PREFIX" wineserver -k 2>/dev/null || true
+        sleep 2
+    else
+        log_info "Existing osu! installation found at: $TARGET_OSU_EXE"
+    fi
+
+    if [ ! -f "$TARGET_OSU_EXE" ]; then
+        notify_error "osu!.exe not found. Installation failed or was aborted by user."
+    fi
+    log_info "osu! located at: $TARGET_OSU_EXE"
+}
+
+create_system_integration() {
+    log_info "Creating system integration files..."
+
+    # 1. Icons
+    local ICON_DIR="$HOME/.local/share/icons/hicolor/128x128/apps"
+    mkdir -p "$ICON_DIR"
+    if [ ! -f "$ICON_DIR/osu-stable-game.png" ]; then
+        curl -L -s -o "$ICON_DIR/osu-stable-game.png"   "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/Osu%21_Logo_2016.svg/512px-Osu%21_Logo_2016.svg.png"
+        curl -L -s -o "$ICON_DIR/osu-stable-map.png"    "https://img.icons8.com/ios11/512/228BE6/osu-lazer.png"
+        curl -L -s -o "$ICON_DIR/osu-stable-skin.png"   "https://img.icons8.com/ios11/512/FAB005/osu-lazer.png"
+        curl -L -s -o "$ICON_DIR/osu-stable-replay.png" "https://img.icons8.com/ios11/512/7950F2/osu-lazer.png"
+        gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+    fi
+
+    local CONFIG_DIR="$HOME/.config/osu-importer"
+    mkdir -p "$CONFIG_DIR"
+
+    # 2. Config file
+    local CONFIG_FILE="$CONFIG_DIR/osu-env.conf"
+    cat > "$CONFIG_FILE" << EOF
+# ==============================================================================
+# osu! Linux Wrapper Configuration  (generated by osu! Installer v4.2.0)
+# ==============================================================================
+
+# --- Core Paths ---
+WINE_PREFIX="$WINE_PREFIX"
+WINE_BIN="$WINE_BIN"
+OSU_LINUX="$TARGET_OSU_EXE"
+
+# --- Localization ---
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+
+# --- Sync (NTSync > Fsync > Esync, Wine picks best available) ---
+# NTSync requires /dev/ntsync (Linux 6.8+).
+# WARNING: Enabling sync with Wine Mono may cause crashes during loading screens.
+EOF
+
+    if [ "$ENABLE_FSYNC" = "TRUE" ]; then
+        printf 'export WINENTSYNC=1\nexport WINEFSYNC=1\nexport WINEESYNC=1\n' >> "$CONFIG_FILE"
+    else
+        printf 'export WINENTSYNC=0\nexport WINEFSYNC=0\nexport WINEESYNC=0\n' >> "$CONFIG_FILE"
+    fi
+
+    cat >> "$CONFIG_FILE" << 'EOF'
+
+# --- Audio Engine & Latency ---
+# Lower buffer = better latency, higher = more stability.
+EOF
+
+    if [[ "$AUDIO_SELECTION" == *"ALSA"* ]]; then
+        echo "export WINEAUDIODRIVER=alsa" >> "$CONFIG_FILE"
+    else
+        echo "export STAGING_AUDIO_DURATION=10000" >> "$CONFIG_FILE"
+        echo "export PULSE_LATENCY_MSEC=60" >> "$CONFIG_FILE"
+        if command -v pw-cli &> /dev/null; then
+            echo 'export PIPEWIRE_LATENCY="1024/48000"' >> "$CONFIG_FILE"
+        fi
+    fi
+
+    cat >> "$CONFIG_FILE" << 'EOF'
+
+# --- Window System ---
+# WINEWAYLAND=1 is experimental with osu! UI elements. Fall back to X11 if menus are invisible.
+EOF
+
+    if [[ "$DRIVER_SELECTION" == *"Wayland"* ]]; then
+        printf 'unset DISPLAY\nexport WINEWAYLAND=1\n' >> "$CONFIG_FILE"
+    else
+        echo "export WAYLAND_DISPLAY=''" >> "$CONFIG_FILE"
+    fi
+
+    cat >> "$CONFIG_FILE" << 'EOF'
+
+# --- Optional Extras ---
+# Uncomment to disable VSync in OpenGL:
+# export vblank_mode=0
+EOF
+
+    # 3. Wrapper script
+    local WRAPPER="$CONFIG_DIR/osu_importer_wrapper.sh"
+    cat > "$WRAPPER" << 'WEOF'
+#!/bin/bash
+CONFIG_FILE="$HOME/.config/osu-importer/osu-env.conf"
+
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "Error: Configuration file not found at $CONFIG_FILE"
+    exit 1
+fi
+source "$CONFIG_FILE"
+
+WINEPATH_BIN="${WINE_BIN%/*}/winepath"
+if [ ! -x "$WINEPATH_BIN" ]; then WINEPATH_BIN="winepath"; fi
+WINE_USER=$(ls -1 "$WINE_PREFIX/drive_c/users/" | grep -v "Public" | head -n 1)
+TEMP_LINUX="$WINE_PREFIX/drive_c/users/$WINE_USER/Temp"
+
+GAME_CMD="\"$WINE_BIN\" \"$OSU_LINUX\""
+WEOF
+
+    if [ "$ENABLE_GAMEMODE" = "TRUE" ]; then
+        cat >> "$WRAPPER" << 'WEOF'
+if command -v gamemoderun &> /dev/null; then
+    GAME_CMD="gamemoderun $GAME_CMD"
+fi
+WEOF
+    fi
+
+    cat >> "$WRAPPER" << 'WEOF'
+
+mkdir -p "$TEMP_LINUX"
+find "$TEMP_LINUX" -type f -mmin +60 -delete 2>/dev/null || true
+
+if ! pgrep -f "osu!.exe" > /dev/null; then
+    notify-send "osu!" "Launching..." 2>/dev/null || true
+    ( export WINEPREFIX="$WINE_PREFIX"; eval "$GAME_CMD" & )
+    for i in {1..45}; do
+        pgrep -f "osu!.exe" > /dev/null && { sleep 5; break; }
+        sleep 1
+    done
+fi
+
+for FILE in "$@"; do
+    [ -f "$FILE" ] || continue
+    NAME="$(basename "$FILE")"
+    cp "$FILE" "$TEMP_LINUX/$NAME"
+    WIN_PATH=$(export WINEPREFIX="$WINE_PREFIX"; "$WINEPATH_BIN" -w "$TEMP_LINUX/$NAME" | tr -d '\r')
+    export WINEPREFIX="$WINE_PREFIX"
+    if ! "$WINE_BIN" "$OSU_LINUX" "$WIN_PATH" &>/dev/null; then
+        notify-send -u critical "osu! Importer" "Failed: $NAME" 2>/dev/null || true
+    else
+        [[ "$NAME" == *.osz ]] && rm "$FILE"
+        notify-send "osu! Importer" "Imported: $NAME" 2>/dev/null || true
+    fi
+done
+exit 0
+WEOF
+    chmod +x "$WRAPPER"
+
+    # 4. Desktop entries
+    cat > "$HOME/.local/share/applications/osu-stable.desktop" << EOF
+[Desktop Entry]
+Name=osu! (Stable)
+Exec="$WRAPPER"
+Icon=osu-stable-game
+Type=Application
+Categories=Game;
+StartupWMClass=osu!.exe
+EOF
+
+    cat > "$HOME/.local/share/applications/osu-importer.desktop" << EOF
+[Desktop Entry]
+Name=osu! Importer
+Exec="$WRAPPER" %F
+Type=Application
+Icon=osu-stable-game
+MimeType=application/x-osu-beatmap;application/x-osu-skin;application/x-osu-replay;
+NoDisplay=true
+EOF
+
+    # 5. MIME types
+    mkdir -p "$HOME/.local/share/mime/packages"
+    cat > "$HOME/.local/share/mime/packages/osu-file-types.xml" << 'EOF'
+<?xml version="1.0"?>
+<mime-info xmlns='http://www.freedesktop.org/standards/shared-mime-info'>
+  <mime-type type="application/x-osu-beatmap">
+    <comment>osu! beatmap</comment>
+    <glob pattern="*.osz"/>
+  </mime-type>
+  <mime-type type="application/x-osu-skin">
+    <comment>osu! skin</comment>
+    <glob pattern="*.osk"/>
+  </mime-type>
+  <mime-type type="application/x-osu-replay">
+    <comment>osu! replay</comment>
+    <glob pattern="*.osr"/>
+  </mime-type>
+</mime-info>
+EOF
+
+    update-mime-database "$HOME/.local/share/mime" 2>/dev/null || true
+    if command -v xdg-mime &> /dev/null; then
+        xdg-mime default osu-importer.desktop application/x-osu-beatmap 2>/dev/null || true
+        xdg-mime default osu-importer.desktop application/x-osu-skin    2>/dev/null || true
+        xdg-mime default osu-importer.desktop application/x-osu-replay  2>/dev/null || true
+    fi
+
+    log_info "System integration complete."
+}
+
+create_osu_symlinks() {
+    log_info "Creating convenience symlinks at $LINKS_DIR..."
+
+    # Locate the osu! data directory inside the prefix
+    local WINE_USER
+    WINE_USER=$(ls -1 "$WINE_PREFIX/drive_c/users/" 2>/dev/null | grep -v "Public" | head -n 1)
+    local OSU_DATA_DIR="$WINE_PREFIX/drive_c/users/$WINE_USER/AppData/Local/osu!"
+
+    if [ ! -d "$OSU_DATA_DIR" ]; then
+        log_warn "osu! data directory not found at $OSU_DATA_DIR — skipping symlinks."
+        return
+    fi
+
+    # Ensure target directories exist inside the prefix
+    for dir in Songs Skins Logs Chat; do
+        mkdir -p "$OSU_DATA_DIR/$dir"
+    done
+
+    mkdir -p "$LINKS_DIR"
+
+    local TIMESTAMP
+    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+    local BACKED_UP=()
+    local CREATED=0
+
+    for dir in Songs Skins Logs Chat; do
+        local LINK_PATH="$LINKS_DIR/$dir"
+        local TARGET="$OSU_DATA_DIR/$dir"
+
+        if [ -L "$LINK_PATH" ]; then
+            # Already a symlink — update only if target differs
+            local CURRENT_TARGET
+            CURRENT_TARGET=$(readlink "$LINK_PATH")
+            if [ "$CURRENT_TARGET" != "$TARGET" ]; then
+                ln -sf "$TARGET" "$LINK_PATH"
+                log_info "  Updated symlink: $LINK_PATH -> $TARGET"
+            else
+                log_info "  Already correct: $LINK_PATH"
+            fi
+
+        elif [ -d "$LINK_PATH" ]; then
+            # Real directory — back it up, then move its contents into the prefix,
+            # then replace with a symlink so the user doesn't lose any data.
+            local BACKUP_PATH="${LINK_PATH}.bak.${TIMESTAMP}"
+            log_warn "  $LINK_PATH is a real directory — backing up to $BACKUP_PATH"
+            mv "$LINK_PATH" "$BACKUP_PATH"
+
+            # Merge existing files into the prefix target so nothing is lost
+            if [ -n "$(ls -A "$BACKUP_PATH" 2>/dev/null)" ]; then
+                log_info "  Merging contents of $BACKUP_PATH into $TARGET ..."
+                cp -rn "$BACKUP_PATH/." "$TARGET/" 2>/dev/null || true
+            fi
+
+            ln -s "$TARGET" "$LINK_PATH"
+            BACKED_UP+=("$dir -> $BACKUP_PATH")
+            CREATED=$((CREATED + 1))
+            log_info "  Created symlink: $LINK_PATH -> $TARGET"
+
+        elif [ -e "$LINK_PATH" ]; then
+            # Regular file with that name — unusual, just warn
+            log_warn "  $LINK_PATH is a regular file — skipping to avoid data loss."
+
+        else
+            ln -s "$TARGET" "$LINK_PATH"
+            log_info "  Created: $LINK_PATH -> $TARGET"
+            CREATED=$((CREATED + 1))
+        fi
+    done
+
+    # Report backups to the user
+    if [ ${#BACKED_UP[@]} -gt 0 ]; then
+        local BAK_MSG="The following directories were backed up before symlinking:\n"
+        for entry in "${BACKED_UP[@]}"; do
+            BAK_MSG="$BAK_MSG  • $entry\n"
+        done
+        BAK_MSG="${BAK_MSG}\nTheir contents were merged into the Wine prefix.\nYou can safely delete the .bak folders once you've verified everything is intact."
+        log_warn "$BAK_MSG"
+        if [ "$SILENT_MODE" = false ]; then
+            notify_warning "$BAK_MSG"
+        fi
+    fi
+
+    if [ $CREATED -gt 0 ]; then
+        log_info "Symlinks ready at: $LINKS_DIR"
+    fi
+}
