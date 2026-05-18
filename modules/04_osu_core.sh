@@ -257,7 +257,12 @@ WEOF
     cat >> "$WRAPPER" << 'WEOF'
 
 mkdir -p "$TEMP_LINUX"
-find "$TEMP_LINUX" -type f -mmin +60 -delete 2>/dev/null || true
+# Sweep orphan .osz/.osk/.osr files older than 5 minutes — these are leftovers
+# from failed imports ("Error moving file" popups) that osu! never consumed.
+# The 5-minute window is long enough that any still-in-flight import from a
+# previous wrapper invocation won't be hit, but short enough that we don't
+# accumulate hundreds of MB of dead files (which the old 60-min threshold did).
+find "$TEMP_LINUX" -maxdepth 1 -type f -mmin +5 \( -name '*.osz' -o -name '*.osk' -o -name '*.osr' \) -delete 2>/dev/null || true
 
 # Wait for the actual osu! window to appear, not just the wine process.
 # Without this, files are pushed during the splash screen and osu! drops them
