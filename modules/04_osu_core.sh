@@ -242,28 +242,70 @@ WEOF
 mkdir -p "$TEMP_LINUX"
 find "$TEMP_LINUX" -type f -mmin +60 -delete 2>/dev/null || true
 
+# Wait for the actual osu! window to appear, not just the wine process.
+# Without this, files are pushed during the splash screen and osu! drops them
+# with "Error moving file". Falls back to a fixed sleep on Wayland or when
+# no X11 window tools are present.
+wait_for_osu_ready() {
+    local TIMEOUT=90
+    if command -v xdotool &> /dev/null; then
+        if timeout "$TIMEOUT" xdotool search --sync --classname 'osu!.exe' &>/dev/null; then
+            sleep 3   # let splash transition into the main menu
+            return 0
+        fi
+    elif command -v wmctrl &> /dev/null; then
+        local i=0
+        while [ "$i" -lt "$TIMEOUT" ]; do
+            wmctrl -lx 2>/dev/null | awk '{print $3}' | grep -qx 'osu!.exe' && { sleep 3; return 0; }
+            sleep 1
+            i=$((i + 1))
+        done
+    fi
+    # Fallback: heuristic wait when no window tools are available (e.g. pure Wayland).
+    sleep 10
+    return 0
+}
+
 if ! pgrep -f "osu!.exe" > /dev/null; then
     notify-send "osu!" "Launching..." 2>/dev/null || true
     ( export WINEPREFIX="$WINE_PREFIX"; eval "$GAME_CMD" & )
-    for i in {1..45}; do
-        pgrep -f "osu!.exe" > /dev/null && { sleep 5; break; }
-        sleep 1
-    done
+    wait_for_osu_ready
 fi
 
+# Stage every input into the Wine Temp dir, then hand all paths to a single
+# osu!.exe invocation. This matches Windows behavior, where one Explorer
+# multi-select fires one handler with N args — instead of spawning Wine N times
+# and racing on osu!'s single-instance lock.
+WIN_PATHS=()
+NAMES=()
+ORIGINALS=()
 for FILE in "$@"; do
     [ -f "$FILE" ] || continue
     NAME="$(basename "$FILE")"
-    cp "$FILE" "$TEMP_LINUX/$NAME"
+    cp "$FILE" "$TEMP_LINUX/$NAME" || continue
     WIN_PATH=$(export WINEPREFIX="$WINE_PREFIX"; "$WINEPATH_BIN" -w "$TEMP_LINUX/$NAME" | tr -d '\r')
-    export WINEPREFIX="$WINE_PREFIX"
-    if ! "$WINE_BIN" "$OSU_LINUX" "$WIN_PATH" &>/dev/null; then
-        notify-send -u critical "osu! Importer" "Failed: $NAME" 2>/dev/null || true
-    else
-        [[ "$NAME" == *.osz ]] && rm "$FILE"
-        notify-send "osu! Importer" "Imported: $NAME" 2>/dev/null || true
-    fi
+    [ -z "$WIN_PATH" ] && continue
+    WIN_PATHS+=("$WIN_PATH")
+    NAMES+=("$NAME")
+    ORIGINALS+=("$FILE")
 done
+
+if [ "${#WIN_PATHS[@]}" -gt 0 ]; then
+    export WINEPREFIX="$WINE_PREFIX"
+    if "$WINE_BIN" "$OSU_LINUX" "${WIN_PATHS[@]}" &>/dev/null; then
+        # Mirror Windows osu! drag-drop behavior: consume .osz originals once imported.
+        for ORIG in "${ORIGINALS[@]}"; do
+            case "$ORIG" in *.osz) [ -f "$ORIG" ] && rm "$ORIG" ;; esac
+        done
+        if [ "${#NAMES[@]}" -eq 1 ]; then
+            notify-send "osu! Importer" "Imported: ${NAMES[0]}" 2>/dev/null || true
+        else
+            notify-send "osu! Importer" "Imported ${#NAMES[@]} files" 2>/dev/null || true
+        fi
+    else
+        notify-send -u critical "osu! Importer" "Failed to import ${#NAMES[@]} file(s)" 2>/dev/null || true
+    fi
+fi
 exit 0
 WEOF
     chmod +x "$WRAPPER"
