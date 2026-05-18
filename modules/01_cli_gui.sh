@@ -57,15 +57,17 @@ EOF
 parse_cli() {
     while [[ "$#" -gt 0 ]]; do
         case $1 in
-            -p|--prefix) WINE_PREFIX="$2"; shift ;;
-            -w|--wine) WINE_SELECTION="$2"; shift ;;
+            -p|--prefix) WINE_PREFIX="$2"; USER_SET_PREFIX=true; shift ;;
+            -w|--wine) WINE_SELECTION="$2"; USER_SET_WINE=true; shift ;;
             -a|--api)
                 if [[ "$2" == "dxvk" ]]; then RENDERER_SELECTION="DXVK (Low Latency)"
                 else RENDERER_SELECTION="OpenGL (Stable)"; fi
+                USER_SET_RENDERER=true
                 shift ;;
             -d|--driver)
                 if [[ "$2" == "wayland" ]]; then DRIVER_SELECTION="Wayland (Native)"
                 else DRIVER_SELECTION="X11 (Recommended)"; fi
+                USER_SET_DRIVER=true
                 shift ;;
             -f|--font)
                 case "$2" in
@@ -75,22 +77,26 @@ parse_cli() {
                     skip)   FONT_SELECTION="Skip" ;;
                     *)      FONT_SELECTION="Noto Sans CJK" ;;
                 esac
+                USER_SET_FONT=true
                 shift ;;
             --rpc)
                 if [[ "$2" == "false" ]]; then INSTALL_RPC_BOOL="FALSE"
                 else INSTALL_RPC_BOOL="TRUE"; fi
+                USER_SET_RPC=true
                 shift ;;
             --dotnet)
                 if [[ "$2" == "mono" ]]; then DOTNET_SELECTION="Wine Mono (Experimental)"
                 else DOTNET_SELECTION="MS .NET 4.8 (Recommended)"; fi
+                USER_SET_DOTNET=true
                 shift ;;
             --audio)
                 if [[ "$2" == "alsa" ]]; then AUDIO_SELECTION="ALSA (Lowest Latency)"
                 else AUDIO_SELECTION="PulseAudio/PipeWire"; fi
+                USER_SET_AUDIO=true
                 shift ;;
-            --links-dir) LINKS_DIR="$2"; shift ;;
-            --no-sync)      ENABLE_FSYNC="FALSE" ;;
-            --no-gamemode)  ENABLE_GAMEMODE="FALSE" ;;
+            --links-dir) LINKS_DIR="$2"; USER_SET_LINKS=true; shift ;;
+            --no-sync)      ENABLE_FSYNC="FALSE";     USER_SET_FSYNC=true ;;
+            --no-gamemode)  ENABLE_GAMEMODE="FALSE";  USER_SET_GAMEMODE=true ;;
             --update)       UPDATE_MODE=true ;;
             # Maintenance modes are handled in install.sh before init_config,
             # but we consume them here to avoid "unknown parameter" warnings.
@@ -138,6 +144,55 @@ run_gui() {
         if [ -z "$WINE_BIN" ]; then exit 1; fi
         WINE_SELECTION="$WINE_BIN"
     fi
+
+    # Everything the user just confirmed in the dashboard counts as an explicit choice.
+    USER_SET_PREFIX=true
+    USER_SET_WINE=true
+    USER_SET_RENDERER=true
+    USER_SET_DRIVER=true
+    USER_SET_FONT=true
+    USER_SET_RPC=true
+    USER_SET_DOTNET=true
+    USER_SET_AUDIO=true
+    USER_SET_FSYNC=true
+    USER_SET_GAMEMODE=true
+    USER_SET_LINKS=true
+}
+
+# Pull a single key=value line from osu-env.conf without sourcing the whole file
+# (sourcing would also import Wine env vars and pollute the installer's environment).
+_get_stored() {
+    local file="$1"
+    local key="$2"
+    [ -f "$file" ] || return 1
+    grep -E "^[[:space:]]*${key}=" "$file" 2>/dev/null \
+        | tail -n 1 \
+        | sed -E "s/^[[:space:]]*${key}=//; s/^\"//; s/\"$//"
+}
+
+# Restore stored user choices for --update, leaving anything the user explicitly
+# passed on the CLI alone (those have USER_SET_* set by parse_cli).
+load_installer_state() {
+    local STORED="$HOME/.config/osu-importer/osu-env.conf"
+    if [ ! -f "$STORED" ]; then
+        notify_error "No existing installation found.\nConfig not present at: $STORED\n\nRun a fresh install first."
+    fi
+
+    local _v
+    [ "${USER_SET_PREFIX:-false}"   = false ] && _v=$(_get_stored "$STORED" WINE_PREFIX)                  && [ -n "$_v" ] && WINE_PREFIX="$_v"
+    [ "${USER_SET_WINE:-false}"     = false ] && _v=$(_get_stored "$STORED" INSTALLER_WINE_SELECTION)     && [ -n "$_v" ] && WINE_SELECTION="$_v"
+    [ "${USER_SET_RENDERER:-false}" = false ] && _v=$(_get_stored "$STORED" INSTALLER_RENDERER_SELECTION) && [ -n "$_v" ] && RENDERER_SELECTION="$_v"
+    [ "${USER_SET_DRIVER:-false}"   = false ] && _v=$(_get_stored "$STORED" INSTALLER_DRIVER_SELECTION)   && [ -n "$_v" ] && DRIVER_SELECTION="$_v"
+    [ "${USER_SET_FONT:-false}"     = false ] && _v=$(_get_stored "$STORED" INSTALLER_FONT_SELECTION)     && [ -n "$_v" ] && FONT_SELECTION="$_v"
+    [ "${USER_SET_AUDIO:-false}"    = false ] && _v=$(_get_stored "$STORED" INSTALLER_AUDIO_SELECTION)    && [ -n "$_v" ] && AUDIO_SELECTION="$_v"
+    [ "${USER_SET_DOTNET:-false}"   = false ] && _v=$(_get_stored "$STORED" INSTALLER_DOTNET_SELECTION)   && [ -n "$_v" ] && DOTNET_SELECTION="$_v"
+    [ "${USER_SET_RPC:-false}"      = false ] && _v=$(_get_stored "$STORED" INSTALLER_INSTALL_RPC_BOOL)   && [ -n "$_v" ] && INSTALL_RPC_BOOL="$_v"
+    [ "${USER_SET_FSYNC:-false}"    = false ] && _v=$(_get_stored "$STORED" INSTALLER_ENABLE_FSYNC)       && [ -n "$_v" ] && ENABLE_FSYNC="$_v"
+    [ "${USER_SET_GAMEMODE:-false}" = false ] && _v=$(_get_stored "$STORED" INSTALLER_ENABLE_GAMEMODE)    && [ -n "$_v" ] && ENABLE_GAMEMODE="$_v"
+    [ "${USER_SET_LINKS:-false}"    = false ] && _v=$(_get_stored "$STORED" INSTALLER_LINKS_DIR)          && [ -n "$_v" ] && LINKS_DIR="$_v"
+
+    # OSU_LINUX path always comes from stored state (no CLI flag for it)
+    _v=$(_get_stored "$STORED" OSU_LINUX) && [ -n "$_v" ] && TARGET_OSU_EXE="$_v"
 }
 
 init_config() {
@@ -168,6 +223,13 @@ init_config() {
     elif [ "$IS_NIXOS" = true ]; then
         log_warn "NixOS detected — the installer cannot install system packages."
         log_warn "Ensure 'wine', 'winetricks', and 32-bit graphics libs are available in your environment."
+    fi
+
+    # In update mode, restore prior selections from osu-env.conf so re-applying
+    # uses what the user actually chose last time — not parse_cli's defaults.
+    # Explicit CLI flags still win (parse_cli set USER_SET_* for those).
+    if [ "$UPDATE_MODE" = true ]; then
+        load_installer_state
     fi
 
     # Normalize boolean flags so downstream code only checks one spelling.

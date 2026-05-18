@@ -208,6 +208,23 @@ EOF
 # export vblank_mode=0
 EOF
 
+    # Installer state — read back by --update to preserve user selections.
+    # Don't edit by hand; re-run the installer to change.
+    cat >> "$CONFIG_FILE" << EOF
+
+# --- Installer state (used by --update; do not edit manually) ---
+INSTALLER_WINE_SELECTION="$WINE_SELECTION"
+INSTALLER_RENDERER_SELECTION="$RENDERER_SELECTION"
+INSTALLER_DRIVER_SELECTION="$DRIVER_SELECTION"
+INSTALLER_FONT_SELECTION="$FONT_SELECTION"
+INSTALLER_DOTNET_SELECTION="$DOTNET_SELECTION"
+INSTALLER_AUDIO_SELECTION="$AUDIO_SELECTION"
+INSTALLER_INSTALL_RPC_BOOL="$INSTALL_RPC_BOOL"
+INSTALLER_ENABLE_FSYNC="$ENABLE_FSYNC"
+INSTALLER_ENABLE_GAMEMODE="$ENABLE_GAMEMODE"
+INSTALLER_LINKS_DIR="$LINKS_DIR"
+EOF
+
     # 3. Wrapper script
     local WRAPPER="$CONFIG_DIR/osu_importer_wrapper.sh"
     cat > "$WRAPPER" << 'WEOF'
