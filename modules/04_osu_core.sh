@@ -294,10 +294,12 @@ if ! pgrep -f "osu!.exe" > /dev/null; then
     wait_for_osu_ready
 fi
 
-# Stage every input into the Wine Temp dir, then hand all paths to a single
-# osu!.exe invocation. This matches Windows behavior, where one Explorer
-# multi-select fires one handler with N args — instead of spawning Wine N times
-# and racing on osu!'s single-instance lock.
+# Stage every input into the Wine Temp dir, then dispatch one wine osu!.exe
+# invocation per file — exactly what Windows Explorer does for a multi-select.
+# Each wine process detects the running osu! via the single-instance mutex and
+# forwards its single path through IPC; osu!'s IPC queue serializes the imports.
+# Passing N paths to a single wine call instead trips osu!'s parallel-import code
+# path, which races on Songs/ and pops "Error moving file" on a random subset.
 WIN_PATHS=()
 NAMES=()
 ORIGINALS=()
@@ -314,18 +316,28 @@ done
 
 if [ "${#WIN_PATHS[@]}" -gt 0 ]; then
     export WINEPREFIX="$WINE_PREFIX"
-    if "$WINE_BIN" "$OSU_LINUX" "${WIN_PATHS[@]}" &>/dev/null; then
-        # Mirror Windows osu! drag-drop behavior: consume .osz originals once imported.
-        for ORIG in "${ORIGINALS[@]}"; do
-            case "$ORIG" in *.osz) [ -f "$ORIG" ] && rm "$ORIG" ;; esac
-        done
-        if [ "${#NAMES[@]}" -eq 1 ]; then
-            notify-send "osu! Importer" "Imported: ${NAMES[0]}" 2>/dev/null || true
-        else
-            notify-send "osu! Importer" "Imported ${#NAMES[@]} files" 2>/dev/null || true
-        fi
+
+    # Stagger 80 ms between launches so osu!'s IPC queue isn't flooded by
+    # concurrent connections from N wine processes hitting the named pipe at once.
+    # 80 ms × 100 files ≈ 8 s of launches, then the parallel wine processes wrap up
+    # in another second or two — feels batchy without overwhelming the queue.
+    for path in "${WIN_PATHS[@]}"; do
+        "$WINE_BIN" "$OSU_LINUX" "$path" &>/dev/null &
+        sleep 0.08
+    done
+    wait
+
+    # We can't tell from outside whether osu! actually imported each one
+    # (Wine returns as soon as IPC hands off, even if osu! later errors).
+    # So we always clean .osz originals and use neutral "Sent" wording.
+    for ORIG in "${ORIGINALS[@]}"; do
+        case "$ORIG" in *.osz) [ -f "$ORIG" ] && rm "$ORIG" ;; esac
+    done
+
+    if [ "${#NAMES[@]}" -eq 1 ]; then
+        notify-send "osu! Importer" "Sent: ${NAMES[0]}" 2>/dev/null || true
     else
-        notify-send -u critical "osu! Importer" "Failed to import ${#NAMES[@]} file(s)" 2>/dev/null || true
+        notify-send "osu! Importer" "Sent ${#NAMES[@]} files to osu!" 2>/dev/null || true
     fi
 fi
 exit 0
