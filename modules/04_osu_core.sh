@@ -294,16 +294,17 @@ if ! pgrep -f "osu!.exe" > /dev/null; then
     wait_for_osu_ready
 fi
 
-# Stage every input into Wine Temp, then dispatch one wine osu!.exe per file —
-# same code path Windows Explorer takes for a multi-select. osu! sees each path
-# arrive through the IPC named pipe and processes them via its serialized
-# IPC queue, so no parallel-import race.
+# Stage every input into Wine Temp, then hand ALL paths to a single
+# osu!.exe invocation. This is what Windows Explorer's multi-select does
+# when the registered verb advertises batch support: one process, N args,
+# osu!'s batch-import code path handles them as a list (visible as a single
+# "Importing N beatmaps" overlay rather than N individual toasts).
 #
-# Per-file wine launches with DISPLAY/WAYLAND_DISPLAY cleared: wine does the
-# IPC handoff entirely through wineserver state (no X11/Wayland needed for
-# the single-instance mutex check), so the compositor never sees a new client
-# connection — no window flashes, no animation glitches. The full GAME_CMD
-# (which DOES need display vars) is only used for cold-starting osu!.
+# Trade-off: osu! occasionally pops "Error moving file" on 1-2 files out
+# of a large batch. That's a known stable-side issue (long filename, bracket
+# chars, or file-lock race during concurrent extraction) and reproduces on
+# native Windows too. Tip: osu! → Options → Maintenance → Force Folder
+# Permissions clears one common cause.
 WIN_PATHS=()
 NAMES=()
 ORIGINALS=()
@@ -319,19 +320,12 @@ for FILE in "$@"; do
 done
 
 if [ "${#WIN_PATHS[@]}" -gt 0 ]; then
-    # Stagger 80 ms — keeps osu!'s IPC pipe from being hit by N concurrent
-    # wineserver clients at once; that's where the import race kicked in.
-    for path in "${WIN_PATHS[@]}"; do
-        env -u DISPLAY -u WAYLAND_DISPLAY \
-            WINEPREFIX="$WINE_PREFIX" \
-            "$WINE_BIN" "$OSU_LINUX" "$path" &>/dev/null &
-        sleep 0.08
-    done
-    wait
+    export WINEPREFIX="$WINE_PREFIX"
+    "$WINE_BIN" "$OSU_LINUX" "${WIN_PATHS[@]}" &>/dev/null
 
-    # Wine returns at IPC handoff (osu! may still be processing). Clean .osz
-    # originals — matches Windows osu! "Delete .osz after import" behavior —
-    # and notify once for the batch.
+    # Wine returns at IPC handoff (osu! may still be processing in the
+    # background). Clean .osz originals — matches Windows osu! "Delete .osz
+    # after import" behavior — and notify once for the batch.
     for ORIG in "${ORIGINALS[@]}"; do
         case "$ORIG" in *.osz) [ -f "$ORIG" ] && rm "$ORIG" ;; esac
     done
