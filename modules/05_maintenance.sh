@@ -8,22 +8,13 @@
 # ==============================================================================
 
 run_update() {
-    local CONFIG_FILE="$HOME/.config/osu-importer/osu-env.conf"
-
-    if [ ! -f "$CONFIG_FILE" ]; then
-        notify_error "No existing installation found.\nConfig not present at: $CONFIG_FILE\n\nRun a fresh install first."
+    # init_config has already restored the prior selections via load_installer_state
+    # and resolved WINE_BIN — we just need to make sure TARGET_OSU_EXE is set.
+    if [ -z "${TARGET_OSU_EXE:-}" ] || [ ! -f "${TARGET_OSU_EXE:-/nonexistent}" ]; then
+        notify_error "Cannot locate osu!.exe for update. Run a fresh install first."
     fi
 
     log_info "Update Mode: re-applying settings to existing installation."
-
-    # Source the old config to inherit WINE_PREFIX, WINE_BIN, OSU_LINUX
-    source "$CONFIG_FILE"
-    WINE_PREFIX="${WINE_PREFIX:-$HOME/.wine-osu}"
-    WINE_BIN="${WINE_BIN:-wine}"
-    TARGET_OSU_EXE="$OSU_LINUX"
-
-    export WINEPREFIX="$WINE_PREFIX"
-    export WINE="$WINE_BIN"
 
     configure_graphics
     install_fonts
