@@ -28,7 +28,7 @@ run_update() {
     configure_graphics
     install_fonts
 
-    if [ "$INSTALL_RPC_BOOL" = "TRUE" ] || [ "$INSTALL_RPC_BOOL" = "true" ]; then
+    if [ "$INSTALL_RPC_BOOL" = "TRUE" ]; then
         install_discord_rpc
     fi
 
@@ -259,13 +259,21 @@ export_config() {
         notify_error "No config directory found at $CONFIG_DIR. Is osu! installed?"
     fi
 
-    tar -czf "$BACKUP_FILE" \
-        -C "$HOME" \
-        ".config/osu-importer" \
-        ".local/share/applications/osu-stable.desktop"   2>/dev/null \
-        ".local/share/applications/osu-importer.desktop" 2>/dev/null \
-        ".local/share/mime/packages/osu-file-types.xml"  2>/dev/null \
-        || true
+    # Only include files that actually exist; tar would otherwise abort on the first missing path.
+    local TAR_ARGS=(".config/osu-importer")
+    [ -f "$HOME/.local/share/applications/osu-stable.desktop" ]   && TAR_ARGS+=(".local/share/applications/osu-stable.desktop")
+    [ -f "$HOME/.local/share/applications/osu-importer.desktop" ] && TAR_ARGS+=(".local/share/applications/osu-importer.desktop")
+    [ -f "$HOME/.local/share/mime/packages/osu-file-types.xml" ]  && TAR_ARGS+=(".local/share/mime/packages/osu-file-types.xml")
+
+    if ! tar -czf "$BACKUP_FILE" -C "$HOME" "${TAR_ARGS[@]}" 2>>"$LOG_FILE"; then
+        rm -f "$BACKUP_FILE"
+        notify_error "tar failed while creating $BACKUP_FILE. See $LOG_FILE for details."
+    fi
+
+    if [ ! -s "$BACKUP_FILE" ]; then
+        rm -f "$BACKUP_FILE"
+        notify_error "Backup archive is empty or missing: $BACKUP_FILE"
+    fi
 
     log_info "Config exported to: $BACKUP_FILE"
 
@@ -302,6 +310,11 @@ import_config() {
 
     tar -xzf "$BACKUP_FILE" -C "$HOME" || notify_error "Failed to extract backup archive."
 
+    # Refresh desktop integration caches so the restored .desktop/MIME entries take effect now,
+    # not after the next login.
+    update-mime-database "$HOME/.local/share/mime" 2>/dev/null || true
+    gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+
     log_info "Config imported successfully."
 
     if [ "$SILENT_MODE" = false ] && command -v yad &> /dev/null; then
@@ -313,8 +326,8 @@ import_config() {
 
 # ==============================================================================
 # LAUNCH
-# Запускает osu! напрямую через конфиг, минуя весь установщик.
-# Удобно для отладки: вывод Wine идёт прямо в терминал.
+# Launches osu! directly via the saved config, bypassing the installer.
+# Useful for debugging — Wine output goes straight to the terminal.
 # ==============================================================================
 
 launch_osu() {
