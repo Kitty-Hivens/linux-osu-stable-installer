@@ -63,16 +63,23 @@ install_fonts() {
 
     local FONT_DIR="$WINE_PREFIX/drive_c/windows/Fonts"
     mkdir -p "$FONT_DIR"
-    # Safe to clear only after we know we're not skipping
-    rm -f "$FONT_DIR/"*
+    # Remove only fonts this installer might have placed previously, and any
+    # stale symlinks from a prior "System Links" run — never user-owned files.
+    rm -f "$FONT_DIR/wqy-microhei.ttc" \
+          "$FONT_DIR/osu-font.otf" \
+          "$FONT_DIR/Koruri-Regular.ttf" \
+          "$FONT_DIR/koruri.tar.xz"
+    find "$FONT_DIR" -maxdepth 1 -type l -delete 2>/dev/null || true
 
     local FONTS_SCRIPT=$(cat << 'EOF'
+        FONT_READY=false
         case "$FONT_SELECTION" in
           "WenQuanYi"*)
             echo "Downloading WenQuanYi Micro Hei..."
-            curl -L -s -o "$FONT_DIR/wqy-microhei.ttc" \
-                "https://github.com/anthonyfok/fonts-wqy-microhei/raw/master/wqy-microhei.ttc"
-            cat > "$WINE_PREFIX/font_fix.reg" << REGEOF
+            if download \
+                "https://github.com/anthonyfok/fonts-wqy-microhei/raw/master/wqy-microhei.ttc" \
+                "$FONT_DIR/wqy-microhei.ttc"; then
+                cat > "$WINE_PREFIX/font_fix.reg" << REGEOF
 REGEDIT4
 [HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\FontSubstitutes]
 "Arial"="WenQuanYi Micro Hei"
@@ -82,12 +89,17 @@ REGEDIT4
 [HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Fonts]
 "WenQuanYi Micro Hei (TrueType)"="wqy-microhei.ttc"
 REGEOF
+                FONT_READY=true
+            else
+                echo "[WARN] Skipping WenQuanYi — download failed."
+            fi
             ;;
           "Noto Sans"*)
             echo "Downloading Noto Sans CJK JP..."
-            curl -L -s -o "$FONT_DIR/osu-font.otf" \
-                "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/Japanese/NotoSansCJKjp-Regular.otf"
-            cat > "$WINE_PREFIX/font_fix.reg" << REGEOF
+            if download \
+                "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/Japanese/NotoSansCJKjp-Regular.otf" \
+                "$FONT_DIR/osu-font.otf"; then
+                cat > "$WINE_PREFIX/font_fix.reg" << REGEOF
 REGEDIT4
 [HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\FontSubstitutes]
 "Arial"="Noto Sans CJK JP Regular"
@@ -97,16 +109,21 @@ REGEDIT4
 [HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Fonts]
 "Noto Sans CJK JP Regular (TrueType)"="osu-font.otf"
 REGEOF
+                FONT_READY=true
+            else
+                echo "[WARN] Skipping Noto Sans CJK — download failed."
+            fi
             ;;
           "Koruri"*)
             echo "Downloading Koruri..."
             cd "$FONT_DIR"
-            curl -L -s -o koruri.tar.xz \
-                "https://github.com/Koruri/Koruri/releases/download/20210720/Koruri-20210720.tar.xz"
-            tar -xf koruri.tar.xz
-            find . -name "Koruri-Regular.ttf" -exec mv {} . \;
-            rm -rf Koruri-* koruri.tar.xz
-            cat > "$WINE_PREFIX/font_fix.reg" << REGEOF
+            if download \
+                "https://github.com/Koruri/Koruri/releases/download/20210720/Koruri-20210720.tar.xz" \
+                "$FONT_DIR/koruri.tar.xz" \
+                && tar -xf koruri.tar.xz; then
+                find . -name "Koruri-Regular.ttf" -exec mv {} . \;
+                rm -rf Koruri-* koruri.tar.xz
+                cat > "$WINE_PREFIX/font_fix.reg" << REGEOF
 REGEDIT4
 [HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\FontSubstitutes]
 "Arial"="Koruri Regular"
@@ -116,6 +133,11 @@ REGEDIT4
 [HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Fonts]
 "Koruri Regular (TrueType)"="Koruri-Regular.ttf"
 REGEOF
+                FONT_READY=true
+            else
+                echo "[WARN] Skipping Koruri — download or extraction failed."
+                rm -f koruri.tar.xz
+            fi
             ;;
           "System"*)
             echo "Linking System Fonts..."
@@ -124,11 +146,13 @@ REGEOF
             find "$HOME/.local/share/fonts" -type f \( -name "*.ttf" -o -name "*.otf" \) \
                 -exec ln -sf {} "$FONT_DIR" \; 2>/dev/null || true
             echo "REGEDIT4" > "$WINE_PREFIX/font_fix.reg"
+            FONT_READY=true
             ;;
         esac
 
-        # Global Font Smoothing (ClearType equivalents)
-        cat >> "$WINE_PREFIX/font_fix.reg" << REGEOF
+        if [ "$FONT_READY" = true ]; then
+            # Global Font Smoothing (ClearType equivalents)
+            cat >> "$WINE_PREFIX/font_fix.reg" << REGEOF
 [HKEY_CURRENT_USER\Control Panel\Desktop]
 "FontSmoothing"="2"
 "FontSmoothingGamma"=dword:00000578
@@ -138,8 +162,9 @@ REGEOF
 "932"="cp932.nls"
 "00000411"="cp932.nls"
 REGEOF
-        WINEPREFIX="$WINE_PREFIX" WAYLAND_DISPLAY="" "$WINE_BIN" regedit "$WINE_PREFIX/font_fix.reg" 2>/dev/null || true
-        rm -f "$WINE_PREFIX/font_fix.reg"
+            WINEPREFIX="$WINE_PREFIX" WAYLAND_DISPLAY="" "$WINE_BIN" regedit "$WINE_PREFIX/font_fix.reg" 2>/dev/null || true
+            rm -f "$WINE_PREFIX/font_fix.reg"
+        fi
 EOF
 )
 

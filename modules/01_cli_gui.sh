@@ -143,12 +143,15 @@ run_gui() {
 init_config() {
     parse_cli "$@"
 
+    local IS_NIXOS=false
+    if [ -f "/etc/NIXOS" ] || grep -q "NixOS" /etc/os-release 2>/dev/null; then
+        IS_NIXOS=true
+    fi
+
     if [ "$SILENT_MODE" = false ]; then
-        # NixOS guard
-        if [ -f "/etc/NIXOS" ] || grep -q "NixOS" /etc/os-release 2>/dev/null; then
-            if ! command -v yad &> /dev/null; then
-                notify_error "NixOS detected. Please install 'yad' manually, or use --silent flag."
-            fi
+        # NixOS guard — auto-install can't work, so require yad pre-installed.
+        if [ "$IS_NIXOS" = true ] && ! command -v yad &> /dev/null; then
+            notify_error "NixOS detected. Please install 'yad' manually, or use --silent flag."
         fi
 
         # Auto-install YAD if missing
@@ -161,8 +164,22 @@ init_config() {
             else notify_error "Package manager not found. Install 'yad' manually or use --silent."; fi
         fi
 
-        run_gui
+        [ "$UPDATE_MODE" = false ] && run_gui
+    elif [ "$IS_NIXOS" = true ]; then
+        log_warn "NixOS detected — the installer cannot install system packages."
+        log_warn "Ensure 'wine', 'winetricks', and 32-bit graphics libs are available in your environment."
     fi
+
+    # Normalize boolean flags so downstream code only checks one spelling.
+    _normalize_bool() {
+        case "${1^^}" in
+            TRUE|1|YES|ON) echo "TRUE" ;;
+            *) echo "FALSE" ;;
+        esac
+    }
+    INSTALL_RPC_BOOL=$(_normalize_bool "$INSTALL_RPC_BOOL")
+    ENABLE_FSYNC=$(_normalize_bool "$ENABLE_FSYNC")
+    ENABLE_GAMEMODE=$(_normalize_bool "$ENABLE_GAMEMODE")
 
     # Resolve WINE_BIN
     if ! command -v "$WINE_SELECTION" &> /dev/null && [ ! -x "$WINE_SELECTION" ]; then

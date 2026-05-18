@@ -22,39 +22,43 @@ done
 
 log_info "Starting osu! Linux Installer v4.2.0"
 
-# --- Mode Dispatch ---
-# Check for special modes before running the full GUI
+# --- Pre-scan for --silent so maintenance commands honor it ---
 for arg in "$@"; do
     case "$arg" in
-        --uninstall)
-            run_uninstall
-            exit 0
-            ;;
-        --health-check)
-            run_health_check
-            exit 0
-            ;;
-        --export-config)
-            export_config
-            exit 0
-            ;;
+        -s|--silent) SILENT_MODE=true ;;
+    esac
+done
+
+# --- Mode Dispatch ---
+# Check for special modes before running the full GUI.
+# Walk args by index so --import-config can grab the next positional reliably.
+ARGS=("$@")
+i=0
+while [ $i -lt ${#ARGS[@]} ]; do
+    case "${ARGS[$i]}" in
+        --uninstall)     run_uninstall;    exit 0 ;;
+        --health-check)  run_health_check; exit $? ;;
+        --export-config) export_config;    exit 0 ;;
+        --launch)        launch_osu ;;  # exec replaces the shell
         --import-config)
-            # Next arg is the file path
-            shift
-            import_config "$1"
-            exit 0
-            ;;
-        --launch)
-            launch_osu
+            i=$((i + 1))
+            import_config "${ARGS[$i]:-}"
             exit 0
             ;;
     esac
+    i=$((i + 1))
 done
 
 # --- Standard Installation Flow ---
 
 # 1. Parse CLI args or launch GUI
 init_config "$@"
+
+# 1a. Update mode short-circuits the full install
+if [ "$UPDATE_MODE" = true ]; then
+    run_update
+    exit 0
+fi
 
 # 2. Check and install missing system dependencies
 check_and_install_dependencies
@@ -69,7 +73,7 @@ configure_graphics
 install_fonts
 
 # 6. Install Discord RPC bridge (if requested)
-if [ "$INSTALL_RPC_BOOL" = "TRUE" ] || [ "$INSTALL_RPC_BOOL" = "true" ]; then
+if [ "$INSTALL_RPC_BOOL" = "TRUE" ]; then
     install_discord_rpc
 fi
 
