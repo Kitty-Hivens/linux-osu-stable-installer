@@ -12,13 +12,6 @@ check_and_install_dependencies() {
         if ! command -v $pkg &> /dev/null; then NEEDS_INSTALL="$NEEDS_INSTALL $pkg"; fi
     done
 
-    # xdotool is used by the import wrapper to wait for the osu! window
-    # (instead of just the process) before forwarding file paths. Soft dep:
-    # Wayland-only users can skip it.
-    if ! command -v xdotool &> /dev/null && ! command -v wmctrl &> /dev/null; then
-        NEEDS_INSTALL="$NEEDS_INSTALL xdotool"
-    fi
-
     # Check for ALSA plugins if ALSA is selected
     if [[ "$AUDIO_SELECTION" == *"ALSA"* ]]; then
         if ! command -v aplay &> /dev/null; then NEEDS_INSTALL="$NEEDS_INSTALL alsa-utils"; fi

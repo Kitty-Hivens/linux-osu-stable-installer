@@ -257,85 +257,30 @@ WEOF
     cat >> "$WRAPPER" << 'WEOF'
 
 mkdir -p "$TEMP_LINUX"
-# Sweep orphan .osz/.osk/.osr files older than 5 minutes — these are leftovers
-# from failed imports ("Error moving file" popups) that osu! never consumed.
-# The 5-minute window is long enough that any still-in-flight import from a
-# previous wrapper invocation won't be hit, but short enough that we don't
-# accumulate hundreds of MB of dead files (which the old 60-min threshold did).
-find "$TEMP_LINUX" -maxdepth 1 -type f -mmin +5 \( -name '*.osz' -o -name '*.osk' -o -name '*.osr' \) -delete 2>/dev/null || true
-
-# Wait for the actual osu! window to appear, not just the wine process.
-# Without this, files are pushed during the splash screen and osu! drops them
-# with "Error moving file". Falls back to a fixed sleep on Wayland or when
-# no X11 window tools are present.
-wait_for_osu_ready() {
-    local TIMEOUT=90
-    if command -v xdotool &> /dev/null; then
-        if timeout "$TIMEOUT" xdotool search --sync --classname 'osu!.exe' &>/dev/null; then
-            sleep 3   # let splash transition into the main menu
-            return 0
-        fi
-    elif command -v wmctrl &> /dev/null; then
-        local i=0
-        while [ "$i" -lt "$TIMEOUT" ]; do
-            wmctrl -lx 2>/dev/null | awk '{print $3}' | grep -qx 'osu!.exe' && { sleep 3; return 0; }
-            sleep 1
-            i=$((i + 1))
-        done
-    fi
-    # Fallback: heuristic wait when no window tools are available (e.g. pure Wayland).
-    sleep 10
-    return 0
-}
+find "$TEMP_LINUX" -type f -mmin +60 -delete 2>/dev/null || true
 
 if ! pgrep -f "osu!.exe" > /dev/null; then
     notify-send "osu!" "Launching..." 2>/dev/null || true
     ( export WINEPREFIX="$WINE_PREFIX"; eval "$GAME_CMD" & )
-    wait_for_osu_ready
+    for i in {1..45}; do
+        pgrep -f "osu!.exe" > /dev/null && { sleep 5; break; }
+        sleep 1
+    done
 fi
 
-# Stage every input into Wine Temp, then hand ALL paths to a single
-# osu!.exe invocation. This is what Windows Explorer's multi-select does
-# when the registered verb advertises batch support: one process, N args,
-# osu!'s batch-import code path handles them as a list (visible as a single
-# "Importing N beatmaps" overlay rather than N individual toasts).
-#
-# Trade-off: osu! occasionally pops "Error moving file" on 1-2 files out
-# of a large batch. That's a known stable-side issue (long filename, bracket
-# chars, or file-lock race during concurrent extraction) and reproduces on
-# native Windows too. Tip: osu! → Options → Maintenance → Force Folder
-# Permissions clears one common cause.
-WIN_PATHS=()
-NAMES=()
-ORIGINALS=()
 for FILE in "$@"; do
     [ -f "$FILE" ] || continue
     NAME="$(basename "$FILE")"
-    cp "$FILE" "$TEMP_LINUX/$NAME" || continue
+    cp "$FILE" "$TEMP_LINUX/$NAME"
     WIN_PATH=$(export WINEPREFIX="$WINE_PREFIX"; "$WINEPATH_BIN" -w "$TEMP_LINUX/$NAME" | tr -d '\r')
-    [ -z "$WIN_PATH" ] && continue
-    WIN_PATHS+=("$WIN_PATH")
-    NAMES+=("$NAME")
-    ORIGINALS+=("$FILE")
-done
-
-if [ "${#WIN_PATHS[@]}" -gt 0 ]; then
     export WINEPREFIX="$WINE_PREFIX"
-    "$WINE_BIN" "$OSU_LINUX" "${WIN_PATHS[@]}" &>/dev/null
-
-    # Wine returns at IPC handoff (osu! may still be processing in the
-    # background). Clean .osz originals — matches Windows osu! "Delete .osz
-    # after import" behavior — and notify once for the batch.
-    for ORIG in "${ORIGINALS[@]}"; do
-        case "$ORIG" in *.osz) [ -f "$ORIG" ] && rm "$ORIG" ;; esac
-    done
-
-    if [ "${#NAMES[@]}" -eq 1 ]; then
-        notify-send "osu! Importer" "Sent: ${NAMES[0]}" 2>/dev/null || true
+    if ! "$WINE_BIN" "$OSU_LINUX" "$WIN_PATH" &>/dev/null; then
+        notify-send -u critical "osu! Importer" "Failed: $NAME" 2>/dev/null || true
     else
-        notify-send "osu! Importer" "Sent ${#NAMES[@]} files to osu!" 2>/dev/null || true
+        [[ "$NAME" == *.osz ]] && rm "$FILE"
+        notify-send "osu! Importer" "Imported: $NAME" 2>/dev/null || true
     fi
-fi
+done
 exit 0
 WEOF
     chmod +x "$WRAPPER"
