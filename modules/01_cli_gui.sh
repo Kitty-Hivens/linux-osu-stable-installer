@@ -1,17 +1,19 @@
 #!/bin/bash
-# Module: CLI Parser and YAD GUI Dashboard
+# Module: CLI Parser and gum TUI Dashboard
 
 # Global Configuration Variables (Defaults)
 DEFAULT_PREFIX="$HOME/.wine-osu"
 if [ -d "$HOME/.osu-wine" ]; then DEFAULT_PREFIX="$HOME/.osu-wine"; fi
 
 BEST_WINE="wine"
-if command -v wine-staging &> /dev/null; then BEST_WINE="wine-staging"; fi
+if command -v wine &> /dev/null && wine --version 2>/dev/null | grep -qi staging; then
+    BEST_WINE="wine-staging"
+fi
 
 WINE_PREFIX="$DEFAULT_PREFIX"
 WINE_SELECTION="$BEST_WINE"
 RENDERER_SELECTION="OpenGL (Stable)"
-DRIVER_SELECTION="X11 (Recommended)"
+DRIVER_SELECTION="Wayland (Recommended)"
 FONT_SELECTION="Noto Sans CJK"
 INSTALL_RPC_BOOL="TRUE"
 DOTNET_SELECTION="MS .NET 4.8 (Recommended)"
@@ -30,7 +32,7 @@ Installation Options:
   -p, --prefix DIR       Wine prefix directory (default: $DEFAULT_PREFIX)
   -w, --wine BIN         Wine binary or path (default: $BEST_WINE)
   -a, --api API          Graphics API: 'opengl' or 'dxvk' (default: opengl)
-  -d, --driver DRIVER    Window driver: 'x11' or 'wayland' (default: x11)
+  -d, --driver DRIVER    Window driver: 'x11' or 'wayland' (default: wayland)
   -f, --font FONT        Fonts: 'wqy', 'noto', 'koruri', 'system', 'skip' (default: noto)
       --rpc true/false   Install Discord RPC Bridge (default: true)
       --dotnet TYPE      Runtime: 'net48' or 'mono' (default: net48)
@@ -48,7 +50,7 @@ Maintenance:
       --launch           Launch osu! using the current configuration
 
 General:
-  -s, --silent           Unattended CLI mode (no YAD GUI)
+  -s, --silent           Unattended CLI mode (no TUI dashboard)
   -h, --help             Show this help message
 EOF
     exit 0
@@ -65,8 +67,8 @@ parse_cli() {
                 USER_SET_RENDERER=true
                 shift ;;
             -d|--driver)
-                if [[ "$2" == "wayland" ]]; then DRIVER_SELECTION="Wayland (Native)"
-                else DRIVER_SELECTION="X11 (Recommended)"; fi
+                if [[ "$2" == "x11" ]]; then DRIVER_SELECTION="X11 (Fallback)"
+                else DRIVER_SELECTION="Wayland (Recommended)"; fi
                 USER_SET_DRIVER=true
                 shift ;;
             -f|--font)
@@ -109,54 +111,51 @@ parse_cli() {
     done
 }
 
-run_gui() {
-    log_info "Launching YAD Dashboard..."
-    local VALUES
+run_tui() {
+    if ! command -v gum &> /dev/null; then
+        log_warn "gum not found -- skipping interactive dashboard; using defaults / CLI flags."
+        return
+    fi
+    log_info "Launching TUI dashboard..."
 
-    VALUES=$(yad --form --center --width=750 --columns=2 \
-        --title="$SCRIPT_TITLE" \
-        --window-icon="$ICON" --image="$ICON" \
-        --text="<b>osu! Configuration Dashboard</b> v4.2.0\nFine-tune your installation parameters:" \
-        --field="Install Location:DIR"        "$WINE_PREFIX" \
-        --field="Wine Binary:CB"              "$BEST_WINE!Custom Path" \
-        --field="Graphics API:CB"             "OpenGL (Stable)!DXVK (Low Latency)" \
-        --field="Window Driver:CB"            "X11 (Recommended)!Wayland (Native)" \
-        --field="Fonts:CB"                    "Noto Sans CJK!WenQuanYi (Micro Hei)!Koruri!System Links!Skip" \
-        --field="Discord RPC:CHK"             "$INSTALL_RPC_BOOL" \
-        --field=".NET Runtime:CB"             "MS .NET 4.8 (Recommended)!Wine Mono (Experimental)" \
-        --field="Audio Backend:CB"            "PulseAudio/PipeWire!ALSA (Lowest Latency)" \
-        --field="Enable FSync/ESync:CHK"      "$ENABLE_FSYNC" \
-        --field="Enable GameMode:CHK"         "$ENABLE_GAMEMODE" \
-        --field="Symlinks Directory:DIR"      "$LINKS_DIR" \
-        --separator="|")
+    # Any cancel (Esc/Ctrl-C) on a required prompt aborts the install cleanly.
+    _abort() { log_info "Installation cancelled."; exit 0; }
 
-    if [ $? -ne 0 ] || [ -z "$VALUES" ]; then
-        log_info "Installation cancelled by user."
-        exit 0
+    gum style --border rounded --padding "1 3" --margin "1 0" --border-foreground 212 \
+        "osu! Configuration Dashboard  v5.0.0" "" "Pick options, Enter confirms each." || true
+
+    WINE_PREFIX=$(gum input --width 72 --prompt "Install location > " --value "$WINE_PREFIX") || _abort
+    [ -n "$WINE_PREFIX" ] || WINE_PREFIX="$DEFAULT_PREFIX"
+
+    local _wine _w _wines=("$BEST_WINE") _seen=" $BEST_WINE "
+    for _w in wine wine-staging; do                          # package labels, not binaries
+        case "$_seen" in *" $_w "*) continue ;; esac
+        _wines+=("$_w"); _seen+="$_w "
+    done
+    _wines+=("Custom path...")
+    _wine=$(gum choose --header "Wine binary" "${_wines[@]}") || _abort
+    if [ "$_wine" = "Custom path..." ]; then
+        WINE_SELECTION=$(gum input --width 72 --prompt "Wine path > " --placeholder "/usr/bin/wine") || _abort
+    else
+        WINE_SELECTION="$_wine"
     fi
 
-    IFS="|" read -r WINE_PREFIX WINE_SELECTION RENDERER_SELECTION DRIVER_SELECTION \
-                    FONT_SELECTION INSTALL_RPC_BOOL DOTNET_SELECTION AUDIO_SELECTION \
-                    ENABLE_FSYNC ENABLE_GAMEMODE LINKS_DIR <<< "$VALUES"
+    RENDERER_SELECTION=$(gum choose --header "Graphics API" "OpenGL (Stable)" "DXVK (Low Latency)") || _abort
+    DRIVER_SELECTION=$(gum choose --header "Window driver" "Wayland (Recommended)" "X11 (Fallback)") || _abort
+    FONT_SELECTION=$(gum choose --header "Fonts" "Noto Sans CJK" "WenQuanYi (Micro Hei)" "Koruri" "System Links" "Skip") || _abort
+    DOTNET_SELECTION=$(gum choose --header ".NET runtime" "MS .NET 4.8 (Recommended)" "Wine Mono (Experimental)") || _abort
+    AUDIO_SELECTION=$(gum choose --header "Audio backend" "PulseAudio/PipeWire" "ALSA (Lowest Latency)") || _abort
+    LINKS_DIR=$(gum input --width 72 --prompt "Symlinks dir > " --value "$LINKS_DIR") || _abort
+    [ -n "$LINKS_DIR" ] || LINKS_DIR="$HOME/osu"
 
-    if [ "$WINE_SELECTION" = "Custom Path" ]; then
-        WINE_BIN=$(yad --file-selection --title="Select Wine Executable" --file-filter="Executable | wine")
-        if [ -z "$WINE_BIN" ]; then exit 1; fi
-        WINE_SELECTION="$WINE_BIN"
-    fi
+    gum confirm "Install Discord RPC bridge?" && INSTALL_RPC_BOOL=TRUE || INSTALL_RPC_BOOL=FALSE
+    gum confirm "Enable FSync/ESync?"         && ENABLE_FSYNC=TRUE     || ENABLE_FSYNC=FALSE
+    gum confirm "Enable Feral GameMode?"      && ENABLE_GAMEMODE=TRUE  || ENABLE_GAMEMODE=FALSE
 
-    # Everything the user just confirmed in the dashboard counts as an explicit choice.
-    USER_SET_PREFIX=true
-    USER_SET_WINE=true
-    USER_SET_RENDERER=true
-    USER_SET_DRIVER=true
-    USER_SET_FONT=true
-    USER_SET_RPC=true
-    USER_SET_DOTNET=true
-    USER_SET_AUDIO=true
-    USER_SET_FSYNC=true
-    USER_SET_GAMEMODE=true
-    USER_SET_LINKS=true
+    # Everything confirmed here counts as an explicit user choice.
+    USER_SET_PREFIX=true; USER_SET_WINE=true; USER_SET_RENDERER=true; USER_SET_DRIVER=true
+    USER_SET_FONT=true; USER_SET_RPC=true; USER_SET_DOTNET=true; USER_SET_AUDIO=true
+    USER_SET_FSYNC=true; USER_SET_GAMEMODE=true; USER_SET_LINKS=true
 }
 
 # Pull a single key=value line from osu-env.conf without sourcing the whole file
@@ -204,25 +203,11 @@ init_config() {
     fi
 
     if [ "$SILENT_MODE" = false ]; then
-        # NixOS guard — auto-install can't work, so require yad pre-installed.
-        if [ "$IS_NIXOS" = true ] && ! command -v yad &> /dev/null; then
-            notify_error "NixOS detected. Please install 'yad' manually, or use --silent flag."
-        fi
-
-        # Auto-install YAD if missing
-        if ! command -v yad &> /dev/null; then
-            echo "YAD not found. Attempting to install..."
-            if command -v pacman &> /dev/null;      then pkexec pacman -S yad --noconfirm
-            elif command -v apt &> /dev/null;        then pkexec apt update && pkexec apt install -y yad
-            elif command -v dnf &> /dev/null;        then pkexec dnf install -y yad
-            elif command -v xbps-install &> /dev/null; then pkexec xbps-install -S -y yad
-            else notify_error "Package manager not found. Install 'yad' manually or use --silent."; fi
-        fi
-
-        [ "$UPDATE_MODE" = false ] && run_gui
+        # gum drives the TUI dashboard; run_tui falls back to defaults if gum is absent.
+        [ "$UPDATE_MODE" = false ] && run_tui
     elif [ "$IS_NIXOS" = true ]; then
-        log_warn "NixOS detected — the installer cannot install system packages."
-        log_warn "Ensure 'wine', 'winetricks', and 32-bit graphics libs are available in your environment."
+        log_warn "NixOS detected -- the installer won't install system packages."
+        log_warn "Run it through the flake so Nix provides deps: 'nix develop' then ./install.sh, or 'nix run .'."
     fi
 
     # In update mode, restore prior selections from osu-env.conf so re-applying
@@ -243,11 +228,11 @@ init_config() {
     ENABLE_FSYNC=$(_normalize_bool "$ENABLE_FSYNC")
     ENABLE_GAMEMODE=$(_normalize_bool "$ENABLE_GAMEMODE")
 
-    # Resolve WINE_BIN
-    if ! command -v "$WINE_SELECTION" &> /dev/null && [ ! -x "$WINE_SELECTION" ]; then
-        log_warn "Wine binary '$WINE_SELECTION' not found in PATH. It may be installed by the dependency step."
+    # Resolve WINE_BIN (wine/wine-staging both map to the `wine` binary).
+    WINE_BIN=$(resolve_wine_bin "$WINE_SELECTION")
+    if [ ! -x "$WINE_BIN" ] && ! command -v "$WINE_BIN" &> /dev/null; then
+        log_warn "Wine binary not found yet ('$WINE_BIN'); the dependency step may install it."
     fi
-    WINE_BIN=$(command -v "$WINE_SELECTION" 2>/dev/null || echo "$WINE_SELECTION")
 
     export WINE="$WINE_BIN"
     export WINEPREFIX="$WINE_PREFIX"

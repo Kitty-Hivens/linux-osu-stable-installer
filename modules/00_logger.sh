@@ -28,31 +28,40 @@ log_warn() {
     echo "[WARNING] $1" | tee -a "$LOG_FILE"
 }
 
-# GUI Helpers (Fallback to console in silent mode)
-SCRIPT_TITLE="osu! Installer v4.2"
-ICON="applications-games"
+# Notification helpers: gum box when interactive, log fallback in silent mode.
 
 notify_user() {
-    if [ "$SILENT_MODE" = true ]; then
-        log_info "$1"
+    if [ "${SILENT_MODE:-false}" = false ] && command -v gum &> /dev/null; then
+        gum style --border rounded --padding "0 2" --border-foreground 212 "$(printf '%b' "$1")"
     else
-        yad --title="$SCRIPT_TITLE" --text="$1" --image="$ICON" --button="OK:0" --center --width=350 || true
+        log_info "$1"
     fi
 }
 
 notify_error() {
     log_error "$1"
-    if [ "$SILENT_MODE" = false ] && command -v yad &> /dev/null; then
-        yad --title="Error" --text="$1" --image="dialog-error" --button="Exit:1" --center --width=350 || true
+    if [ "${SILENT_MODE:-false}" = false ] && command -v gum &> /dev/null; then
+        gum style --border rounded --padding "0 2" --border-foreground 196 "ERROR" "$(printf '%b' "$1")" || true
     fi
     exit 1
 }
 
 notify_warning() {
     log_warn "$1"
-    if [ "$SILENT_MODE" = false ]; then
-        yad --title="Warning" --text="$1" --image="dialog-warning" --button="OK:0" --center --width=350 || true
+    if [ "${SILENT_MODE:-false}" = false ] && command -v gum &> /dev/null; then
+        gum style --border rounded --padding "0 2" --border-foreground 214 "WARNING" "$(printf '%b' "$1")" || true
     fi
+}
+
+# wine and wine-staging both provide the `wine` binary on most distros (Arch ships no
+# `wine-staging` binary at all); only a custom path is used verbatim. Maps the user's
+# SELECTION to the real binary.
+resolve_wine_bin() {
+    case "$1" in
+        /*)                echo "$1" ;;
+        wine|wine-staging) command -v wine 2>/dev/null || echo wine ;;
+        *)                 command -v "$1" 2>/dev/null || echo "$1" ;;
+    esac
 }
 
 # Download $1 to $2 with --fail. Returns 0 on success and non-empty file.

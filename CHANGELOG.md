@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [v5.0.0] -- 2026-06-18 (YY-MM-DD)
+
+### Changed
+- **Configuration UI moved from YAD to `gum`**: the dashboard, confirmations, progress, and notifications now render as a terminal TUI. YAD is no longer a dependency anywhere in the installer.
+- **Defaults are now `wine-staging` + native Wayland + OpenGL**, reflecting the current stable baseline. Window-driver labels became `Wayland (Recommended)` / `X11 (Fallback)`.
+- **Wine selection is treated as a package, not a binary**: `wine-staging` provides the `wine` binary (there is no separate `wine-staging` executable on most distros). Staging is detected via `wine --version`, the binary is resolved through `resolve_wine_bin()`, and dependencies install only when the `wine` binary is genuinely absent.
+
+### Added
+- **Batch beatmap import**: dropping several `.osz` at once places the extras into `Songs/` and triggers a single in-game refresh instead of handing each file off separately; single files and skins/replays still use the direct handoff. Import notifications are quiet by default, with `OSU_IMPORTER_DEBUG=1` for verbose output.
+- **NixOS support via a Nix flake** (`flake.nix`): `nix run` / `nix develop` provide every dependency, so no system package installation is required. One `install.sh` adapts to NixOS rather than maintaining a separate script.
+- **Decorative-glyph font fallback**: a `FontLink\SystemLink` chain to DejaVu Sans / Noto Sans Symbols lets dingbats such as `U+2727` in beatmap titles render instead of showing as boxes, which no CJK font carries.
+
+### Fixed
+- **Native Wayland was never actually enabled**: v4.2.0 switched to `WINEWAYLAND=1`, which is a no-op. Reverted to the registry `HKCU\Software\Wine\Drivers\Graphics` key (`wayland,x11`) -- the real driver selector.
+- **Unnecessary `wine-staging` reinstall**: the dependency check skips when the `wine` binary is present, so `pkexec`/`pacman` is not invoked when staging is already installed.
+- **Noisy install output**: Wine registry and utility commands now redirect both stdout and stderr, so harmless "registry value not found" / "service not started" lines no longer leak to the terminal after the TUI migration.
+
+### Known Issues
+- **Wine Mono + sync**: unchanged -- disable FSync/ESync/NTSync when using Wine Mono.
+- On NixOS the symbol-glyph fallback needs DejaVu / Noto symbol fonts visible to `fontconfig`; the flake provides them, but a pure dev shell may need them in the system font path.
+
+---
+
 ## [v4.2.0] — 2026-03-05 (YY-MM-DD)
 
 ### Architecture
@@ -21,7 +44,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **CLI silent mode** (`--silent` / `-s`): fully unattended installation without YAD
 - **Update mode** (`--update`): re-applies graphics, fonts, RPC, and desktop integration over an existing installation without re-downloading osu!
 - **Uninstall** (`--uninstall`): interactive removal of prefix, desktop entries, MIME types, symlinks, and config with confirmation prompt
-- **Health check** (`--health-check`): verifies 10 installation components, reports ✅/❌ in YAD or terminal
+- **Health check** (`--health-check`): verifies 10 installation components, reports pass/fail in YAD or terminal
 - **Config export/import** (`--export-config` / `--import-config <file>`): tar.gz backup with timestamp
 - **Debug launch** (`--launch`): starts osu! directly from config with full Wine output in terminal — useful for diagnosing startup issues
 - **Convenience symlinks**: creates `~/osu/{Songs,Skins,Logs,Chat}` pointing into the Wine prefix. Path configurable via `--links-dir DIR` or YAD Dashboard field

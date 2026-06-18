@@ -1,7 +1,7 @@
 #!/bin/bash
 # ==============================================================================
 # osu! Linux Installer (Stable)
-# Version: v4.2.0
+# Version: v5.0.0
 # Author:  Kitty-Hivens
 # ==============================================================================
 
@@ -20,7 +20,7 @@ for module in "${REQUIRED_MODULES[@]}"; do
     source "$MODULES_DIR/${module}.sh"
 done
 
-log_info "Starting osu! Linux Installer v4.2.0"
+log_info "Starting osu! Linux Installer v5.0.0"
 
 # --- Pre-scan for --silent so maintenance commands honor it ---
 for arg in "$@"; do

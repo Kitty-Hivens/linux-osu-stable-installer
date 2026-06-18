@@ -45,15 +45,16 @@ run_uninstall() {
         PREFIX="${WINE_PREFIX:-$PREFIX}"
     fi
 
-    if [ "$SILENT_MODE" = false ] && command -v yad &> /dev/null; then
-        yad --title="Uninstall osu!" \
-            --text="<b>This will permanently remove:</b>\n\n• Wine prefix: <tt>$PREFIX</tt>\n• Desktop entries\n• MIME types\n• Wrapper config\n• Convenience symlinks (<tt>~/osu/</tt>)\n\n<b>Your beatmaps and skins inside the prefix will be deleted.</b>\nBack them up first if needed." \
-            --button="Cancel:1" --button="Uninstall:0" --center --width=480
-
-        if [ $? -ne 0 ]; then
-            log_info "Uninstall cancelled by user."
-            exit 0
-        fi
+    if [ "$SILENT_MODE" = false ] && command -v gum &> /dev/null; then
+        gum style --border rounded --padding "1 2" --border-foreground 196 \
+            "Uninstall osu!" "" \
+            "This permanently removes:" \
+            "  - Wine prefix: $PREFIX" \
+            "  - Desktop entries, MIME types, wrapper config" \
+            "  - Convenience symlinks (~/osu/)" \
+            "" \
+            "Beatmaps and skins inside the prefix WILL be deleted. Back them up first."
+        gum confirm --default=false "Really uninstall?" || { log_info "Uninstall cancelled."; exit 0; }
     else
         echo ""
         echo "[WARNING] This will permanently delete the osu! Wine prefix and all integration files."
@@ -102,13 +103,7 @@ run_uninstall() {
     rm -f "$HOME/.osu_installer.log"
 
     log_info "Uninstallation complete."
-    if [ "$SILENT_MODE" = false ] && command -v yad &> /dev/null; then
-        yad --title="Uninstall Complete" \
-            --text="osu! has been fully removed from your system." \
-            --image="dialog-information" --button="OK:0" --center --width=350 || true
-    else
-        echo "[SUCCESS] osu! has been fully removed."
-    fi
+    notify_user "osu! has been fully removed from your system."
 }
 
 # ==============================================================================
@@ -130,10 +125,10 @@ run_health_check() {
         local DETAIL="$3"
         if [ "$STATUS" = "ok" ]; then
             PASS=$((PASS + 1))
-            REPORT="$REPORT✅ $LABEL\n"
+            REPORT="$REPORT✓ $LABEL\n"
         else
             FAIL=$((FAIL + 1))
-            REPORT="$REPORT❌ $LABEL — $DETAIL\n"
+            REPORT="$REPORT✗ $LABEL -- $DETAIL\n"
         fi
     }
 
@@ -222,13 +217,9 @@ run_health_check() {
     local SUMMARY="Health Check Results: $PASS passed, $FAIL failed\n\n$REPORT"
     log_info "Health check: $PASS passed, $FAIL failed"
 
-    if [ "$SILENT_MODE" = false ] && command -v yad &> /dev/null; then
-        local ICON_TYPE="dialog-information"
-        [ $FAIL -gt 0 ] && ICON_TYPE="dialog-warning"
-        yad --title="osu! Health Check" \
-            --text="$SUMMARY" \
-            --image="$ICON_TYPE" \
-            --button="OK:0" --center --width=500 || true
+    if [ "$SILENT_MODE" = false ] && command -v gum &> /dev/null; then
+        local _fg=82; [ $FAIL -gt 0 ] && _fg=214
+        gum style --border rounded --padding "1 2" --border-foreground "$_fg" "$(printf '%b' "$SUMMARY")"
     else
         echo -e "\n$SUMMARY"
     fi
@@ -268,11 +259,7 @@ export_config() {
 
     log_info "Config exported to: $BACKUP_FILE"
 
-    if [ "$SILENT_MODE" = false ] && command -v yad &> /dev/null; then
-        notify_user "Config exported successfully!\n\nBackup saved to:\n<tt>$BACKUP_FILE</tt>"
-    else
-        echo "[SUCCESS] Config exported to: $BACKUP_FILE"
-    fi
+    notify_user "Config exported successfully!\nBackup saved to: $BACKUP_FILE"
 }
 
 # ==============================================================================
@@ -283,10 +270,9 @@ import_config() {
     local BACKUP_FILE="$1"
 
     if [ -z "$BACKUP_FILE" ]; then
-        if [ "$SILENT_MODE" = false ] && command -v yad &> /dev/null; then
-            BACKUP_FILE=$(yad --file-selection \
-                --title="Select osu! config backup" \
-                --file-filter="Backup archives | *.tar.gz")
+        if [ "$SILENT_MODE" = false ] && command -v gum &> /dev/null; then
+            log_info "Pick a backup archive (*.tar.gz):"
+            BACKUP_FILE=$(gum file "$HOME") || exit 0
             [ -z "$BACKUP_FILE" ] && exit 0
         else
             notify_error "Usage: ./install.sh --import-config <path/to/backup.tar.gz>"
@@ -308,11 +294,7 @@ import_config() {
 
     log_info "Config imported successfully."
 
-    if [ "$SILENT_MODE" = false ] && command -v yad &> /dev/null; then
-        notify_user "Config imported successfully!\n\nRestart osu! for changes to take effect."
-    else
-        echo "[SUCCESS] Config imported from: $BACKUP_FILE"
-    fi
+    notify_user "Config imported successfully! Restart osu! for changes to take effect."
 }
 
 # ==============================================================================

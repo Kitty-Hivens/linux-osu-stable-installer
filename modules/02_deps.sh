@@ -17,8 +17,9 @@ check_and_install_dependencies() {
         if ! command -v aplay &> /dev/null; then NEEDS_INSTALL="$NEEDS_INSTALL alsa-utils"; fi
     fi
 
-    # Wine check (not a GPU driver, goes into base list)
-    if ! command -v "$WINE_SELECTION" &> /dev/null && [[ "$WINE_SELECTION" != /* ]]; then
+    # Wine: the binary is always `wine`; the SELECTION names which package to install.
+    # If `wine` is already present, install nothing (covers wine-staging providing it).
+    if [[ "$WINE_SELECTION" != /* ]] && ! command -v wine &> /dev/null; then
         NEEDS_INSTALL="$NEEDS_INSTALL $WINE_SELECTION"
     fi
 
@@ -63,7 +64,7 @@ check_and_install_dependencies() {
     fi
 
     # Re-evaluate WINE_BIN after potential installation
-    WINE_BIN=$(command -v "$WINE_SELECTION" 2>/dev/null || echo "$WINE_SELECTION")
+    WINE_BIN=$(resolve_wine_bin "$WINE_SELECTION")
     export WINE="$WINE_BIN"
 
     if [ "$DRIVERS_INSTALLED" = true ]; then
@@ -90,6 +91,11 @@ _run_package_manager() {
             pkexec xbps-install -Sy void-repo-multilib
         fi
         pkexec xbps-install -Sy $PACKAGES
+    elif [ -f /etc/NIXOS ] || grep -qi nixos /etc/os-release 2>/dev/null; then
+        log_warn "NixOS detected, and these deps aren't on PATH: $PACKAGES"
+        log_warn "Run the installer through the flake so Nix provides them:"
+        log_warn "    nix develop   # then: ./install.sh"
+        log_warn "    nix run github:Kitty-Hivens/linux-osu-stable-installer   # one-shot"
     else
         log_warn "No supported package manager found. Please install manually: $PACKAGES"
     fi

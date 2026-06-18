@@ -1,16 +1,16 @@
 # osu! Linux Installer (Stable)
 
-**Version:** v4.2.0
+**Version:** v5.0.0
 **License:** MIT
 **Languages:** [English](README.md) | [Русский](README_RU.md)
 
 A modular Bash installer for the automated deployment and configuration of the osu! (stable) client on Linux. Prioritizes low-latency performance, correct system integration, and support for modern graphics stacks.
 
-Uses `yad` (Yet Another Dialog) for a graphical configuration dashboard. Fully unattended CLI mode is also supported.
+Uses `gum` for a clean terminal (TUI) configuration dashboard. Fully unattended CLI mode is also supported.
 
 ## Key Features
 
-- **Multi-distribution:** Arch Linux, Debian/Ubuntu, Fedora, Void Linux. NixOS partially supported.
+- **Multi-distribution:** Arch Linux, Debian/Ubuntu, Fedora, Void Linux, and NixOS (first-class via the bundled Nix flake).
 - **Graphics:** OpenGL or DXVK (DirectX → Vulkan translation for reduced input latency).
 - **Window system:** X11 (stable) or native Wayland driver (experimental, Wine 11.3+).
 - **Fonts:** CJK font installation and Wine registry patching — WenQuanYi, Noto Sans CJK, Koruri, or system font linking.
@@ -24,10 +24,10 @@ Uses `yad` (Yet Another Dialog) for a graphical configuration dashboard. Fully u
 ## System Requirements
 
 - **OS:** Linux (Arch, Debian, Fedora, Void, or derivatives).
-- **Dependencies:** `curl`, `unzip`, `winetricks`, `yad` — installed automatically on supported distros.
-- **Wine:** `wine-staging` recommended. Standard `wine` is supported.
+- **Dependencies:** `curl`, `unzip`, `winetricks`, `gum` — installed automatically on supported distros.
+- **Wine:** `wine-staging` recommended (and the default). Standard `wine` is supported.
 
-> **NixOS users:** Automatic dependency resolution is not supported. Use the [native fork](https://github.com/afanetd/linux-osu-stable-installer-nixos) by **afanetd**, or install `yad` and `wine` manually and run with `--silent`.
+> **NixOS users:** First-class via the bundled Nix flake — Nix supplies every dependency, no manual setup. See [NixOS](#nixos).
 
 ## Installation
 
@@ -39,6 +39,19 @@ chmod +x install.sh
 ```
 
 > **Security note:** Root privileges (via `pkexec`) are requested **only** to install missing system packages. osu! itself is installed entirely in the user's home directory.
+
+### NixOS
+
+The repository ships a Nix flake, so Nix supplies every dependency (Wine staging, `gum`, `winetricks`, fonts, `ydotool`, ...) — no system package installation, no `--silent` workaround:
+
+```bash
+# one-shot install / configure
+nix run github:Kitty-Hivens/linux-osu-stable-installer
+
+# or drop into a dev shell with everything on PATH, then run it yourself
+nix develop github:Kitty-Hivens/linux-osu-stable-installer
+./install.sh
+```
 
 ## Configuration Dashboard
 
@@ -92,10 +105,10 @@ This is the most important configuration choice:
 
 | | MS .NET 4.8 | Wine Mono |
 | :--- | :--- | :--- |
-| **Stability** | ✅ Recommended | ⚠️ Experimental |
-| **FSync/ESync/NTSync** | ✅ Safe to enable | ❌ Must be disabled — causes crash |
-| **Install time** | ~5–10 min | Instant (bundled) |
-| **Crash symptom** | — | `mono-error.c:647` assertion on startup |
+| **Stability** | Recommended | Experimental |
+| **FSync/ESync/NTSync** | Safe to enable | Must be disabled (causes crash) |
+| **Install time** | ~5-10 min | Instant (bundled) |
+| **Crash symptom** | none | `mono-error.c:647` assertion on startup |
 
 If you selected Mono and osu! crashes immediately, either switch to .NET 4.8 via `--update`, or disable sync in `~/.config/osu-importer/osu-env.conf`.
 
@@ -158,7 +171,7 @@ rm -f ~/osu/Songs ~/osu/Skins ~/osu/Logs ~/osu/Chat
 
 - **Wayland cursor confinement:** On Hyprland and Sway, the cursor may not be correctly confined to the osu! window. Use the X11 driver if this occurs.
 - **Wine Mono + FSync:** Enabling any sync primitive (FSync/ESync/NTSync) with Wine Mono causes a crash at startup (`mono-error.c:647`). Use MS .NET 4.8 or disable sync.
-- **NixOS:** Automatic dependency installation is not possible. Install `yad` via `configuration.nix` or `nix-env`, then run with `--silent`.
+- **NixOS:** Run through the bundled flake (`nix run` / `nix develop`) so Nix provides the dependencies — see [NixOS](#nixos).
 
 ## License
 
