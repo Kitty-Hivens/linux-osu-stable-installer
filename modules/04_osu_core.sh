@@ -399,7 +399,7 @@ elif [ "${#osz[@]}" -gt 1 ]; then
 fi
 
 _total=$(( ${#osz[@]} + ${#other[@]} ))
-[ "$_total" -gt 0 ] && note "osu! Importer" "Imported $_total item(s)."
+[ "$_total" -gt 0 ] && dbg "osu! Importer" "Imported $_total item(s)."
 exit 0
 WEOF
     chmod +x "$WRAPPER"
