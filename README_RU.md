@@ -12,13 +12,14 @@
 
 - **Мультиплатформенность:** Arch Linux, Debian/Ubuntu, Fedora, Void Linux и NixOS (first-class через встроенный Nix flake).
 - **Графика:** OpenGL или DXVK (трансляция DirectX → Vulkan для снижения задержки ввода).
-- **Оконная система:** X11 (стабильный) или нативный Wayland-драйвер (экспериментальный, Wine 11.3+).
-- **Шрифты:** Установка CJK-шрифтов и патчинг реестра Wine — WenQuanYi, Noto Sans CJK, Koruri или системные шрифты.
+- **Оконная система:** Нативный Wayland (по умолчанию, без оверхеда XWayland) или X11 (фолбэк). Драйвер переключается через реестр Wine — `WINEWAYLAND=1` сам по себе ничего не делает.
+- **Шрифты:** Установка CJK-шрифтов (Noto Sans CJK, WenQuanYi, Koruri или системные) плюс фолбэк по глифам, чтобы декоративные dingbats в тайтлах карт рисовались, а не превращались в квадраты.
 - **Аудио:** PulseAudio/PipeWire или ALSA, с настроенными переменными задержки.
 - **Синхронизация:** FSync / ESync / NTSync (NTSync требует Linux 6.8+ и `/dev/ntsync`).
 - **GameMode:** Опциональная интеграция с [Feral GameMode](https://github.com/FeralInteractive/gamemode).
 - **Интеграция с системой:** Desktop-запись, регистрация MIME-типов для `.osz` / `.osk` / `.osr`, скрипт-обёртка.
 - **Удобные симлинки:** `~/osu/{Songs,Skins,Logs,Chat}` ведут прямо в Wine-префикс.
+- **Импортёр карт:** двойной клик по `.osz` / `.osk` / `.osr` импортирует в запущенную игру; несколько файлов сразу — батчем за один проход.
 - **Команды обслуживания:** обновление, удаление, проверка состояния, экспорт/импорт конфига, отладочный запуск.
 
 ## Системные требования
@@ -55,14 +56,14 @@ nix develop github:Kitty-Hivens/linux-osu-stable-installer
 
 ## Параметры Dashboard
 
-При первом запуске открывается окно конфигурации:
+При первом запуске открывается интерактивный TUI-дашборд в терминале (на `gum`):
 
 | Параметр | Описание |
 | :--- | :--- |
 | **Install Location** | Директория Wine-префикса. По умолчанию: `~/.wine-osu` |
 | **Wine Binary** | Автоопределение `wine-staging`. Можно указать кастомный путь (Proton, Wine-GE). |
 | **Graphics API** | **OpenGL** — стандартный рендер, подходит для старого железа. **DXVK** — трансляция в Vulkan, рекомендуется для современных GPU. |
-| **Window Driver** | **X11** — стабильный, совместим со всеми композиторами. **Wayland** — нативный драйвер Wine, убирает оверхед XWayland. *Экспериментальный.* |
+| **Window Driver** | **Wayland** (по умолчанию) — нативный драйвер Wine, без оверхеда XWayland. **X11** — фолбэк для максимальной совместимости с композиторами. |
 | **Fonts** | Замена системного шрифта Windows для корректного отображения CJK-символов. |
 | **Discord RPC** | Установка [rpc-bridge](https://github.com/EnderIce2/rpc-bridge) для Rich Presence в Linux-клиенте Discord. |
 | **.NET Runtime** | **MS .NET 4.8** (рекомендуется) или **Wine Mono** (экспериментальный). См. примечание ниже. |
@@ -80,7 +81,7 @@ nix develop github:Kitty-Hivens/linux-osu-stable-installer
   -p, --prefix DIR       Директория Wine-префикса (по умолчанию: ~/.wine-osu)
   -w, --wine BIN         Бинарник Wine или путь
   -a, --api API          Графический API: 'opengl' или 'dxvk'
-  -d, --driver DRIVER    Драйвер окна: 'x11' или 'wayland'
+  -d, --driver DRIVER    Драйвер окна: 'x11' или 'wayland' (по умолчанию: wayland)
   -f, --font FONT        Шрифт: 'wqy', 'noto', 'koruri', 'system', 'skip'
       --rpc true/false   Discord RPC Bridge (по умолчанию: true)
       --dotnet TYPE      Рантайм: 'net48' или 'mono'
@@ -88,7 +89,7 @@ nix develop github:Kitty-Hivens/linux-osu-stable-installer
       --no-sync          Отключить FSync/ESync/NTSync
       --no-gamemode      Отключить GameMode
       --links-dir DIR    Директория симлинков (по умолчанию: ~/osu)
-  -s, --silent           Автономный режим без GUI
+  -s, --silent           Автономный режим без TUI
 
 Обслуживание:
       --update           Переприменить настройки к существующей установке
@@ -128,6 +129,10 @@ nix develop github:Kitty-Hivens/linux-osu-stable-installer
 
 Если любая из этих директорий уже существовала как реальная папка — инсталлятор создаёт резервную копию (`Songs.bak.TIMESTAMP`), переносит содержимое в Wine-префикс и создаёт симлинк.
 
+### Импорт карт
+
+Двойной клик по `.osz`, `.osk` или `.osr` в файловом менеджере импортирует их в запущенную osu! (игра запускается сама, если ещё не открыта). Выбор нескольких `.osz` разом импортирует их батчем за один проход, а не по попапу на файл. Уведомления по умолчанию тихие — поставь `OSU_IMPORTER_DEBUG=1` в конфиге для пофайловых деталей.
+
 ### Настройка параметров
 
 Все переменные запуска хранятся в `~/.config/osu-importer/osu-env.conf`. Файл можно редактировать напрямую:
@@ -139,6 +144,9 @@ export vblank_mode=0
 # Уменьшить аудио-буфер для меньшей задержки (может вызывать треск на слабых системах):
 export STAGING_AUDIO_DURATION=5000
 export PULSE_LATENCY_MSEC=30
+
+# Подробные уведомления импорта (пофайлово / запуск / рескан):
+export OSU_IMPORTER_DEBUG=1
 ```
 
 ### Отладочный запуск
@@ -169,7 +177,7 @@ rm -f ~/osu/Songs ~/osu/Skins ~/osu/Logs ~/osu/Chat
 
 ## Известные проблемы
 
-- **Конфайнмент курсора на Wayland:** На Hyprland и Sway курсор может некорректно ограничиваться областью окна. Используйте X11-драйвер.
+- **Raw input на Wayland:** нативный Wayland-драйвер не даёт настоящий raw input — выключи Raw Input в osu! и задавай чувствительность через DPI мыши, и играй в **Borderless**, а не exclusive fullscreen (он мерцает на смене фокуса). Нужен hardware-raw — используй X11-драйвер.
 - **Wine Mono + FSync:** Включение любого примитива синхронизации (FSync/ESync/NTSync) совместно с Wine Mono вызывает краш при старте (`mono-error.c:647`). Используйте MS .NET 4.8 или отключите синхронизацию.
 - **NixOS:** Запускайте через встроенный flake (`nix run` / `nix develop`), чтобы Nix предоставил зависимости — см. [NixOS](#nixos).
 
