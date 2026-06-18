@@ -12,13 +12,14 @@ Uses `gum` for a clean terminal (TUI) configuration dashboard. Fully unattended 
 
 - **Multi-distribution:** Arch Linux, Debian/Ubuntu, Fedora, Void Linux, and NixOS (first-class via the bundled Nix flake).
 - **Graphics:** OpenGL or DXVK (DirectX → Vulkan translation for reduced input latency).
-- **Window system:** X11 (stable) or native Wayland driver (experimental, Wine 11.3+).
-- **Fonts:** CJK font installation and Wine registry patching — WenQuanYi, Noto Sans CJK, Koruri, or system font linking.
+- **Window system:** Native Wayland (default, no XWayland overhead) or X11 (fallback). The driver is selected via the Wine registry — `WINEWAYLAND=1` alone does nothing.
+- **Fonts:** CJK font installation (Noto Sans CJK, WenQuanYi, Koruri, or system linking) plus a symbol-glyph fallback so decorative dingbats in beatmap titles render instead of boxes.
 - **Audio:** PulseAudio/PipeWire or ALSA backend, with tuned latency environment variables.
 - **Sync:** FSync / ESync / NTSync support (NTSync requires Linux 6.8+ `/dev/ntsync`).
 - **GameMode:** Optional [Feral GameMode](https://github.com/FeralInteractive/gamemode) integration.
 - **System integration:** Desktop entry, MIME type registration for `.osz` / `.osk` / `.osr`, wrapper script.
 - **Convenience symlinks:** `~/osu/{Songs,Skins,Logs,Chat}` pointing into the Wine prefix for easy access.
+- **Beatmap importer:** double-click `.osz` / `.osk` / `.osr` to import into the running game; multi-file drops batch-import in a single in-game pass.
 - **Maintenance commands:** update, uninstall, health check, config export/import, debug launch.
 
 ## System Requirements
@@ -55,14 +56,14 @@ nix develop github:Kitty-Hivens/linux-osu-stable-installer
 
 ## Configuration Dashboard
 
-On first run, a configuration window appears:
+On first run, an interactive terminal dashboard appears (powered by `gum`):
 
 | Parameter | Description |
 | :--- | :--- |
 | **Install Location** | Wine prefix directory. Default: `~/.wine-osu` |
 | **Wine Binary** | Auto-detects `wine-staging`. Custom paths (Proton, Wine-GE) can be specified. |
 | **Graphics API** | **OpenGL** — standard renderer, good for older hardware. **DXVK** — Vulkan translation, recommended for modern GPUs. |
-| **Window Driver** | **X11** — stable, compatible with all compositors. **Wayland** — native Wine driver, eliminates XWayland overhead. *Experimental.* |
+| **Window Driver** | **Wayland** (default) — native Wine driver, no XWayland overhead. **X11** — fallback for maximum compositor compatibility. |
 | **Fonts** | Replaces the Windows UI font to fix CJK character rendering in beatmap lists and chat. |
 | **Discord RPC** | Installs [rpc-bridge](https://github.com/EnderIce2/rpc-bridge) for Rich Presence in the Linux Discord client. |
 | **.NET Runtime** | **MS .NET 4.8** (recommended) or **Wine Mono** (experimental). See note below. |
@@ -80,7 +81,7 @@ Installation:
   -p, --prefix DIR       Wine prefix directory (default: ~/.wine-osu)
   -w, --wine BIN         Wine binary or path (default: wine-staging or wine)
   -a, --api API          Graphics API: 'opengl' or 'dxvk'
-  -d, --driver DRIVER    Window driver: 'x11' or 'wayland'
+  -d, --driver DRIVER    Window driver: 'x11' or 'wayland' (default: wayland)
   -f, --font FONT        Font: 'wqy', 'noto', 'koruri', 'system', 'skip'
       --rpc true/false   Install Discord RPC bridge (default: true)
       --dotnet TYPE      Runtime: 'net48' or 'mono'
@@ -88,7 +89,7 @@ Installation:
       --no-sync          Disable FSync/ESync/NTSync
       --no-gamemode      Disable GameMode integration
       --links-dir DIR    Symlink directory (default: ~/osu)
-  -s, --silent           Unattended mode, no GUI
+  -s, --silent           Unattended mode, no TUI
 
 Maintenance:
       --update           Re-apply settings to existing installation
@@ -128,6 +129,10 @@ After installation, your osu! data is accessible at:
 
 If any of those directories already existed as real folders, the installer backs them up as `Songs.bak.TIMESTAMP`, merges the contents into the Wine prefix, then creates the symlink.
 
+### Importing Beatmaps
+
+Double-click a `.osz`, `.osk`, or `.osr` in your file manager and it imports into the running osu! (the game is launched first if it is not already open). Selecting several `.osz` at once batch-imports them in a single in-game pass instead of one pop-up per file. Notifications are quiet by default — set `OSU_IMPORTER_DEBUG=1` in the config for per-file detail.
+
 ### Tweaking Settings
 
 All launch parameters are stored in `~/.config/osu-importer/osu-env.conf`. Edit it directly to adjust audio buffers, sync flags, or VSync:
@@ -139,6 +144,9 @@ export vblank_mode=0
 # Lower audio buffer for better latency (may cause crackling on slow systems):
 export STAGING_AUDIO_DURATION=5000
 export PULSE_LATENCY_MSEC=30
+
+# Verbose beatmap-import notifications (per-file / launching / rescan):
+export OSU_IMPORTER_DEBUG=1
 ```
 
 ### Debug Launch
@@ -169,7 +177,7 @@ rm -f ~/osu/Songs ~/osu/Skins ~/osu/Logs ~/osu/Chat
 
 ## Known Issues
 
-- **Wayland cursor confinement:** On Hyprland and Sway, the cursor may not be correctly confined to the osu! window. Use the X11 driver if this occurs.
+- **Wayland raw input:** the native Wayland driver does not expose true raw input — turn osu!'s Raw Input **off** and set sensitivity via mouse DPI, and run **Borderless** rather than exclusive fullscreen (which flickers on focus changes). If you need hardware-raw input, use the X11 driver instead.
 - **Wine Mono + FSync:** Enabling any sync primitive (FSync/ESync/NTSync) with Wine Mono causes a crash at startup (`mono-error.c:647`). Use MS .NET 4.8 or disable sync.
 - **NixOS:** Run through the bundled flake (`nix run` / `nix develop`) so Nix provides the dependencies — see [NixOS](#nixos).
 
