@@ -133,6 +133,13 @@ create_system_integration() {
         download "https://img.icons8.com/ios11/512/228BE6/osu-lazer.png"                                                      "$ICON_DIR/osu-stable-map.png"    || log_warn "Could not fetch osu-stable-map icon."
         download "https://img.icons8.com/ios11/512/FAB005/osu-lazer.png"                                                      "$ICON_DIR/osu-stable-skin.png"   || log_warn "Could not fetch osu-stable-skin icon."
         download "https://img.icons8.com/ios11/512/7950F2/osu-lazer.png"                                                      "$ICON_DIR/osu-stable-replay.png" || log_warn "Could not fetch osu-stable-replay icon."
+        # The sources are 512px but this is the 128x128 dir; strict icon consumers
+        if command -v magick &>/dev/null || command -v convert &>/dev/null; then
+            local _im _ic; _im="$(command -v magick || command -v convert)"
+            for _ic in "$ICON_DIR"/osu-stable-{game,map,skin,replay}.png; do
+                [ -f "$_ic" ] && "$_im" "$_ic" -resize 128x128 "$_ic" >/dev/null 2>&1 || true
+            done
+        fi
         gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
     fi
 
@@ -427,20 +434,28 @@ EOF
 
     # 5. MIME types
     mkdir -p "$HOME/.local/share/mime/packages"
+    # Drop MIME packages from older installer versions so they don't shadow this one.
+    rm -f "$HOME/.local/share/mime/packages/osu-importer.xml" \
+          "$HOME/.local/share/mime/packages/osu-stable-importer.xml"
     cat > "$HOME/.local/share/mime/packages/osu-file-types.xml" << 'EOF'
-<?xml version="1.0"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <mime-info xmlns='http://www.freedesktop.org/standards/shared-mime-info'>
   <mime-type type="application/x-osu-beatmap">
     <comment>osu! beatmap</comment>
+    <sub-class-of type="application/zip"/>
     <glob pattern="*.osz"/>
+    <icon name="osu-stable-map"/>
   </mime-type>
   <mime-type type="application/x-osu-skin">
     <comment>osu! skin</comment>
+    <sub-class-of type="application/zip"/>
     <glob pattern="*.osk"/>
+    <icon name="osu-stable-skin"/>
   </mime-type>
   <mime-type type="application/x-osu-replay">
     <comment>osu! replay</comment>
     <glob pattern="*.osr"/>
+    <icon name="osu-stable-replay"/>
   </mime-type>
 </mime-info>
 EOF
