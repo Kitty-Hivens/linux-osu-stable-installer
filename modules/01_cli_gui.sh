@@ -122,7 +122,7 @@ run_tui() {
     _abort() { log_info "Installation cancelled."; exit 0; }
 
     gum style --border rounded --padding "1 3" --margin "1 0" --border-foreground 212 \
-        "osu! Configuration Dashboard  v5.0.0" "" "Pick options, Enter confirms each." || true
+        "osu! Configuration Dashboard  v5.0.1" "" "Pick options, Enter confirms each." || true
 
     WINE_PREFIX=$(gum input --width 72 --prompt "Install location > " --value "$WINE_PREFIX") || _abort
     [ -n "$WINE_PREFIX" ] || WINE_PREFIX="$DEFAULT_PREFIX"

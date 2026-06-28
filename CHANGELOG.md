@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [v5.0.1] -- 2026-06-28
+
+### Fixed
+- **Mismatched icon sizes**: the file-type icon sources are 512px but were written into the `128x128` hicolor directory; they are now scaled to match it.
+- **MIME registration consolidated**: `.osz`/`.osk`/`.osr` now carry per-type `<icon>` hints, with beatmaps and skins marked `sub-class-of application/zip`; the duplicate MIME packages left by earlier versions -- which could shadow the icon hints -- are removed.
+
+---
+
 ## [v5.0.0] -- 2026-06-18 (YY-MM-DD)
 
 ### Changed
