@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [v5.0.2] -- 2026-07-10
+
+### Added
+- **File-indexer opt-out in the Wine prefix**: the installer drops `.trackerignore` and `.nomedia` markers at the prefix root so background indexers -- GNOME Tracker (`tracker-miners`) and others that honor these markers -- skip the entire Wine tree, above all the large `Songs/` directory that would otherwise be rescanned on every pass. The markers are written idempotently, and `--update` backfills them on prefixes created by earlier versions.
+
+---
+
 ## [v5.0.1] -- 2026-06-28
 
 ### Fixed

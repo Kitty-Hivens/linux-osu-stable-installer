@@ -16,6 +16,9 @@ run_update() {
 
     log_info "Update Mode: re-applying settings to existing installation."
 
+    # Backfill index-opt-out markers on prefixes created before this was added.
+    write_index_markers
+
     configure_graphics
     install_fonts
 

@@ -1,9 +1,22 @@
 #!/bin/bash
 # Module: Wine Prefix, Graphics APIs, and Fonts
 
+# Drop file-indexer opt-out markers at the prefix root so background indexers skip the whole
+# Wine tree -- above all the large Songs directory, which otherwise wastes IO/CPU on every scan.
+# .trackerignore is read by GNOME Tracker (tracker-miners); .nomedia is honored by Tracker and
+# several other indexers. Idempotent: existing markers are left untouched.
+write_index_markers() {
+    [ -d "$WINE_PREFIX" ] || return 0
+    local marker
+    for marker in .trackerignore .nomedia; do
+        [ -e "$WINE_PREFIX/$marker" ] || : > "$WINE_PREFIX/$marker"
+    done
+}
+
 setup_wine_prefix() {
     log_info "Setting up Wine Prefix at $WINE_PREFIX..."
     mkdir -p "$WINE_PREFIX"
+    write_index_markers
 
     if [[ "$DOTNET_SELECTION" == *"Mono"* ]]; then
         log_info "Using Wine Mono — skipping MS .NET 4.8 installation."

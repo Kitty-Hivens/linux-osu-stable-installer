@@ -1,6 +1,6 @@
 # osu! Linux Installer (Stable)
 
-**Version:** v5.0.1
+**Version:** v5.0.2
 **License:** MIT
 **Languages:** [English](README.md) | [Русский](README_RU.md)
 
