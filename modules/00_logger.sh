@@ -76,3 +76,34 @@ download() {
     rm -f "$out"
     return 1
 }
+
+# True if $1 starts with the PNG signature. An HTTP 200 carrying an error page or an
+# SVG passes download()'s non-empty check, and the resulting file would silently fail
+# to render as an icon.
+is_png() {
+    [ -s "$1" ] || return 1
+    [ "$(od -An -tx1 -N4 "$1" 2>/dev/null | tr -d ' \n')" = "89504e47" ]
+}
+
+# Echo the pixel dimensions of PNG $1 as WxH, read from the IHDR header.
+png_size() {
+    local w h
+    w=$(od -An -tu4 -j16 -N4 --endian=big "$1" 2>/dev/null | tr -d ' ')
+    h=$(od -An -tu4 -j20 -N4 --endian=big "$1" 2>/dev/null | tr -d ' ')
+    [ -n "$w" ] && [ -n "$h" ] && [ "$w" -gt 0 ] && [ "$h" -gt 0 ] || return 1
+    echo "${w}x${h}"
+}
+
+# Download the first URL that yields real PNG bytes into $1. Remaining args are
+# candidate URLs, tried in order.
+download_png() {
+    local out="$1"; shift
+    local url
+    for url in "$@"; do
+        if download "$url" "$out" && is_png "$out"; then
+            return 0
+        fi
+        rm -f "$out"
+    done
+    return 1
+}

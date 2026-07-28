@@ -45,6 +45,15 @@ EOF
     eval "$RPC_SCRIPT"
 }
 
+# True while a game client is up. Wine sets the process name to osu!.exe and hands the
+# game a Windows path, so the prefix never shows up in the command line. Match the process
+# name first; the fallback keeps the backslash so an unrelated command line that merely
+# mentions osu!.exe cannot trigger it. Neither pattern matches osu!install.exe.
+osu_client_running() {
+    pgrep -x 'osu!\.exe' >/dev/null 2>&1 && return 0
+    pgrep -f 'osu!\\osu!\.exe' >/dev/null 2>&1
+}
+
 install_osu_client() {
     log_info "Checking for existing osu! installation..."
 
@@ -98,11 +107,19 @@ install_osu_client() {
         wait $INSTALLER_PID 2>/dev/null || true  # Mono will assert/crash here — that's expected
 
         if [ -f "$EXPECTED_PATH" ]; then
-            log_info "Extraction successful. Launching the game for first-time setup..."
             TARGET_OSU_EXE="$EXPECTED_PATH"
-            env WINENTSYNC=0 WINEFSYNC=0 WINEESYNC=0 WINEWAYLAND=0 WAYLAND_DISPLAY="" \
-                WINEPREFIX="$WINE_PREFIX" LC_ALL=en_US.UTF-8 \
-                "$WINE_BIN" "$TARGET_OSU_EXE"
+            # osu!install.exe hands off to osu!.exe and exits, so the wine loader returns
+            # while the game is still coming up. Starting a second client here leaves two
+            # of them fighting over osu!.db and the user cfg.
+            if osu_client_running; then
+                log_info "osu! was started by its own installer -- waiting for you to close it."
+                while osu_client_running; do sleep 2; done
+            else
+                log_info "Extraction successful. Launching the game for first-time setup..."
+                env WINENTSYNC=0 WINEFSYNC=0 WINEESYNC=0 WINEWAYLAND=0 WAYLAND_DISPLAY="" \
+                    WINEPREFIX="$WINE_PREFIX" LC_ALL=en_US.UTF-8 \
+                    "$WINE_BIN" "$TARGET_OSU_EXE"
+            fi
         else
             notify_error "osu!.exe not found after installation. The updater may have completely failed."
         fi
@@ -121,27 +138,130 @@ install_osu_client() {
     log_info "osu! located at: $TARGET_OSU_EXE"
 }
 
+ICON_BASE="$HOME/.local/share/icons/hicolor"
+
+# True if icon $1 is already installed under any size directory.
+_icon_present() {
+    local f
+    for f in "$ICON_BASE"/*/apps/"$1".png; do
+        [ -f "$f" ] && return 0
+    done
+    return 1
+}
+
+# Install PNG $1 under icon name $2, into the hicolor directory matching its real pixel
+# size. Sizes outside the standard set are squared off to 128 when ImageMagick is around;
+# without it the file is left where it is rather than lying about its size.
+_install_icon() {
+    local src="$1" name="$2" size dir im old
+    is_png "$src" || return 1
+    size=$(png_size "$src") || return 1
+    case "$size" in
+        16x16|22x22|24x24|32x32|48x48|64x64|72x72|96x96|128x128|192x192|256x256|512x512) ;;
+        *)
+            im=$(command -v magick || command -v convert) || return 1
+            "$im" "$src" -resize 128x128 -background none -gravity center -extent 128x128 "$src" >/dev/null 2>&1 || return 1
+            size="128x128"
+            ;;
+    esac
+    dir="$ICON_BASE/$size/apps"
+    mkdir -p "$dir" || return 1
+    # Drop other size variants so a re-install cannot leave a stale copy shadowing this one.
+    for old in "$ICON_BASE"/*/apps/"$name".png; do
+        [ -f "$old" ] && [ "$old" != "$dir/$name.png" ] && rm -f "$old"
+    done
+    cp -f "$src" "$dir/$name.png"
+}
+
+# Pull the largest icon out of Windows executable $1 into PNG $2. Needs icoutils.
+_extract_exe_icon() {
+    local exe="$1" out="$2" tmp ico png sz area best best_area
+    command -v wrestool >/dev/null 2>&1 && command -v icotool >/dev/null 2>&1 || return 1
+    [ -f "$exe" ] || return 1
+    tmp=$(mktemp -d) || return 1
+
+    wrestool -x -t 14 -o "$tmp" "$exe" >/dev/null 2>&1
+    for ico in "$tmp"/*.ico; do
+        [ -f "$ico" ] && icotool -x -o "$tmp" "$ico" >/dev/null 2>&1
+    done
+
+    best=""; best_area=0
+    for png in "$tmp"/*.png; do
+        [ -f "$png" ] || continue
+        sz=$(png_size "$png") || continue
+        area=$(( ${sz%x*} * ${sz#*x} ))
+        if [ "$area" -gt "$best_area" ]; then best_area=$area; best="$png"; fi
+    done
+
+    if [ -n "$best" ]; then
+        cp -f "$best" "$out" && rm -rf "$tmp" && return 0
+    fi
+    rm -rf "$tmp"
+    return 1
+}
+
+# Install the launcher and file-type icons, skipping any already present. The launcher
+# icon is taken from osu!.exe when icoutils is available -- no network, and it always
+# matches the installed build -- with a download as fallback. Failures are non-fatal but
+# set ICON_INSTALL_FAILED so the installation summary can report them.
+install_icons() {
+    local tmp pair name color
+    tmp=$(mktemp -d) || { log_warn "Could not create a temp directory for icons."; ICON_INSTALL_FAILED=true; return 0; }
+
+    if _icon_present osu-stable-game; then
+        log_info "  Application icon already installed."
+    elif _extract_exe_icon "${TARGET_OSU_EXE:-}" "$tmp/osu-stable-game.png" \
+        || download_png "$tmp/osu-stable-game.png" \
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/Osu%21_Logo_2016.svg/500px-Osu%21_Logo_2016.svg.png" \
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/Osu%21_Logo_2016.svg/250px-Osu%21_Logo_2016.svg.png"
+    then
+        _install_icon "$tmp/osu-stable-game.png" osu-stable-game \
+            || { log_warn "Could not install the osu! application icon."; ICON_INSTALL_FAILED=true; }
+    else
+        log_warn "Could not obtain the osu! application icon (install icoutils to extract it from osu!.exe)."
+        ICON_INSTALL_FAILED=true
+    fi
+
+    for pair in "osu-stable-map 228BE6" "osu-stable-skin FAB005" "osu-stable-replay 7950F2"; do
+        IFS=' ' read -r name color <<< "$pair"
+        _icon_present "$name" && continue
+        if download_png "$tmp/$name.png" "https://img.icons8.com/ios11/512/$color/osu-lazer.png"; then
+            _install_icon "$tmp/$name.png" "$name" \
+                || { log_warn "Could not install the $name icon."; ICON_INSTALL_FAILED=true; }
+        else
+            log_warn "Could not fetch the $name icon."
+            ICON_INSTALL_FAILED=true
+        fi
+    done
+
+    rm -rf "$tmp"
+}
+
+# Warning line for the closing report; empty when every icon landed.
+icon_status_note() {
+    [ "${ICON_INSTALL_FAILED:-false}" = true ] || return 0
+    printf '%s' "Some icons could not be installed -- affected menu and file-type entries will show a placeholder.
+Re-run with --update to retry once the sources are reachable."
+}
+
+# Refresh what desktop environments actually read. GTK uses icon-theme.cache; KDE keeps
+# .desktop entries -- icon name included -- in ksycoca and keeps showing the stale entry
+# until that is rebuilt.
+refresh_desktop_caches() {
+    gtk-update-icon-cache -f -t "$ICON_BASE" 2>/dev/null || true
+    update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+    if command -v kbuildsycoca6 >/dev/null 2>&1; then
+        kbuildsycoca6 --noincremental >/dev/null 2>&1 || true
+    elif command -v kbuildsycoca5 >/dev/null 2>&1; then
+        kbuildsycoca5 --noincremental >/dev/null 2>&1 || true
+    fi
+}
+
 create_system_integration() {
     log_info "Creating system integration files..."
 
     # 1. Icons
-    local ICON_DIR="$HOME/.local/share/icons/hicolor/128x128/apps"
-    mkdir -p "$ICON_DIR"
-    if [ ! -f "$ICON_DIR/osu-stable-game.png" ]; then
-        # Icons are non-critical — log a warning if any fail, but don't abort the install.
-        download "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/Osu%21_Logo_2016.svg/512px-Osu%21_Logo_2016.svg.png" "$ICON_DIR/osu-stable-game.png"   || log_warn "Could not fetch osu-stable-game icon."
-        download "https://img.icons8.com/ios11/512/228BE6/osu-lazer.png"                                                      "$ICON_DIR/osu-stable-map.png"    || log_warn "Could not fetch osu-stable-map icon."
-        download "https://img.icons8.com/ios11/512/FAB005/osu-lazer.png"                                                      "$ICON_DIR/osu-stable-skin.png"   || log_warn "Could not fetch osu-stable-skin icon."
-        download "https://img.icons8.com/ios11/512/7950F2/osu-lazer.png"                                                      "$ICON_DIR/osu-stable-replay.png" || log_warn "Could not fetch osu-stable-replay icon."
-        # The sources are 512px but this is the 128x128 dir; strict icon consumers
-        if command -v magick &>/dev/null || command -v convert &>/dev/null; then
-            local _im _ic; _im="$(command -v magick || command -v convert)"
-            for _ic in "$ICON_DIR"/osu-stable-{game,map,skin,replay}.png; do
-                [ -f "$_ic" ] && "$_im" "$_ic" -resize 128x128 "$_ic" >/dev/null 2>&1 || true
-            done
-        fi
-        gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
-    fi
+    install_icons
 
     local CONFIG_DIR="$HOME/.config/osu-importer"
     mkdir -p "$CONFIG_DIR"
@@ -155,7 +275,7 @@ create_system_integration() {
     fi
     cat > "$CONFIG_FILE" << EOF
 # ==============================================================================
-# osu! Linux Wrapper Configuration  (generated by osu! Installer v5.0.2)
+# osu! Linux Wrapper Configuration  (generated by osu! Installer v5.0.3)
 # ==============================================================================
 
 # --- Core Paths ---
@@ -412,6 +532,7 @@ WEOF
     chmod +x "$WRAPPER"
 
     # 4. Desktop entries
+    mkdir -p "$HOME/.local/share/applications"
     cat > "$HOME/.local/share/applications/osu-stable.desktop" << EOF
 [Desktop Entry]
 Name=osu! (Stable)
@@ -466,6 +587,8 @@ EOF
         xdg-mime default osu-importer.desktop application/x-osu-skin    2>/dev/null || true
         xdg-mime default osu-importer.desktop application/x-osu-replay  2>/dev/null || true
     fi
+
+    refresh_desktop_caches
 
     log_info "System integration complete."
 }

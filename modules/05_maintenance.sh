@@ -31,6 +31,12 @@ run_update() {
 
     log_info "Update complete."
     notify_user "Update complete!\n\nSettings re-applied. Launch osu! from your app menu."
+
+    local ICON_NOTE
+    ICON_NOTE=$(icon_status_note)
+    if [ -n "$ICON_NOTE" ]; then
+        notify_warning "$ICON_NOTE"
+    fi
 }
 
 # ==============================================================================
@@ -85,8 +91,8 @@ run_uninstall() {
     update-mime-database "$HOME/.local/share/mime" 2>/dev/null || true
 
     log_info "Removing icons..."
-    rm -f "$HOME/.local/share/icons/hicolor/128x128/apps/osu-stable"*.png
-    gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+    rm -f "$HOME/.local/share/icons/hicolor"/*/apps/osu-stable*.png
+    refresh_desktop_caches
 
     log_info "Removing config and wrapper..."
     rm -rf "$HOME/.config/osu-importer"
@@ -185,6 +191,19 @@ run_health_check() {
         _check "Desktop entry (importer)" "ok" ""
     else
         _check "Desktop entry (importer)" "fail" "Missing osu-importer.desktop"
+    fi
+
+    # A .desktop entry whose Icon= has no matching file renders as a placeholder,
+    # which the file checks above cannot catch.
+    local MISSING_ICONS=""
+    local icon
+    for icon in osu-stable-game osu-stable-map osu-stable-skin osu-stable-replay; do
+        _icon_present "$icon" || MISSING_ICONS="$MISSING_ICONS $icon"
+    done
+    if [ -z "$MISSING_ICONS" ]; then
+        _check "Icons" "ok" ""
+    else
+        _check "Icons" "fail" "Missing:$MISSING_ICONS -- run --update to retry"
     fi
 
     # MIME types
@@ -293,7 +312,7 @@ import_config() {
     # Refresh desktop integration caches so the restored .desktop/MIME entries take effect now,
     # not after the next login.
     update-mime-database "$HOME/.local/share/mime" 2>/dev/null || true
-    gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+    refresh_desktop_caches
 
     log_info "Config imported successfully."
 

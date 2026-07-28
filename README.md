@@ -1,6 +1,6 @@
 # osu! Linux Installer (Stable)
 
-**Version:** v5.0.2
+**Version:** v5.0.3
 **License:** MIT
 **Languages:** [English](README.md) | [Русский](README_RU.md)
 
@@ -25,7 +25,7 @@ Uses `gum` for a clean terminal (TUI) configuration dashboard. Fully unattended 
 ## System Requirements
 
 - **OS:** Linux (Arch, Debian, Fedora, Void, or derivatives).
-- **Dependencies:** `curl`, `unzip`, `winetricks`, `gum` — installed automatically on supported distros.
+- **Dependencies:** `curl`, `unzip`, `winetricks`, `icoutils`, `gum` — installed automatically on supported distros.
 - **Wine:** `wine-staging` recommended (and the default). Standard `wine` is supported.
 
 > **NixOS users:** First-class via the bundled Nix flake — Nix supplies every dependency, no manual setup. See [NixOS](#nixos).

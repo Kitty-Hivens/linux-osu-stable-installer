@@ -1,7 +1,7 @@
 #!/bin/bash
 # ==============================================================================
 # osu! Linux Installer (Stable)
-# Version: v5.0.2
+# Version: v5.0.3
 # Author:  Kitty-Hivens
 # ==============================================================================
 
@@ -20,7 +20,7 @@ for module in "${REQUIRED_MODULES[@]}"; do
     source "$MODULES_DIR/${module}.sh"
 done
 
-log_info "Starting osu! Linux Installer v5.0.2"
+log_info "Starting osu! Linux Installer v5.0.3"
 
 # --- Pre-scan for --silent so maintenance commands honor it ---
 for arg in "$@"; do
@@ -92,6 +92,11 @@ else
     echo -e "\n[SUCCESS] osu! installation complete! Find it in your app menu."
     echo "Symlinks:  $LINKS_DIR"
     echo "Config:    ~/.config/osu-importer/osu-env.conf"
+fi
+
+ICON_NOTE=$(icon_status_note)
+if [ -n "$ICON_NOTE" ]; then
+    notify_warning "$ICON_NOTE"
 fi
 
 exit 0

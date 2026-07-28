@@ -12,6 +12,10 @@ check_and_install_dependencies() {
         if ! command -v $pkg &> /dev/null; then NEEDS_INSTALL="$NEEDS_INSTALL $pkg"; fi
     done
 
+    # icoutils ships wrestool/icotool, which pull the launcher icon straight out of
+    # osu!.exe. The binary name does not match the package name, so check it separately.
+    if ! command -v wrestool &> /dev/null; then NEEDS_INSTALL="$NEEDS_INSTALL icoutils"; fi
+
     # Check for ALSA plugins if ALSA is selected
     if [[ "$AUDIO_SELECTION" == *"ALSA"* ]]; then
         if ! command -v aplay &> /dev/null; then NEEDS_INSTALL="$NEEDS_INSTALL alsa-utils"; fi

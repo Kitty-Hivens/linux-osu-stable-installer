@@ -17,6 +17,7 @@
         winetricks
         gum                            # TUI (this installer dropped yad)
         curl unzip
+        icoutils                       # wrestool/icotool -- launcher icon out of osu!.exe
         fontconfig                     # fc-list, for the symbol-glyph fallback
         dejavu_fonts                   # DejaVu Sans -- carries U+2727 and other dingbats
         noto-fonts noto-fonts-cjk-sans # CJK + Noto symbols

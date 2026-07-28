@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [v5.0.3] -- 2026-07-28
+
+### Fixed
+- **Application icon was never installed**: Wikimedia stopped serving arbitrary thumbnail widths and now rejects the hardcoded 512px URL with HTTP 400, so `osu-stable-game.png` was missing on every new installation while the `.desktop` entry still pointed at it -- KDE Plasma and other strict icon consumers rendered a placeholder. The launcher icon is now extracted from the installed `osu!.exe` at its native resolution via `icoutils`, with downloads at accepted widths as a fallback.
+- **Two osu! clients after a fresh install**: `osu!install.exe` starts the game itself before exiting, so the wine loader returned while the client was still coming up and the installer launched a second one on top of it; both then competed over `osu!.db` and the user configuration. The installer now detects a client the updater already started and waits for it to close instead.
+- **Desktop entries went stale on KDE**: `update-desktop-database` and `kbuildsycoca` were never invoked, so Plasma kept serving the cached entry -- icon included -- until the next login. All integration paths (install, update, uninstall, config import) now refresh the icon, desktop, and service caches together.
+- **Icons landed in a directory that did not match their size**: files are now written to the hicolor directory matching their actual pixel dimensions, and other size variants of the same icon are removed so a stale copy cannot shadow the current one.
+- **A failed download could pass as an icon**: only the file size was checked, so an HTML error page or an SVG served with HTTP 200 was stored under a `.png` name. Downloads are now validated against the PNG signature.
+- **One missing icon blocked the others**: all four downloads were gated on a single file, so any other icon that failed was never retried. Each icon is now checked and fetched independently.
+- **Install could abort when `~/.local/share/applications` did not exist**: the directory is created before the desktop entries are written.
+
+### Added
+- **Icon failures surface in the closing report** in both the TUI and `--silent`, instead of scrolling past as a warning mid-run.
+- **`--health-check` verifies the icon files**, not just the `.desktop` entries -- an entry pointing at a missing icon was previously reported as healthy.
+
+### Changed
+- **`icoutils` is now a dependency** (`wrestool`, `icotool`), installed alongside the other base packages and provided by the Nix flake.
+
+---
+
 ## [v5.0.2] -- 2026-07-10
 
 ### Added
