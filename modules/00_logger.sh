@@ -105,6 +105,14 @@ is_png() {
     [ "$(od -An -tx1 -N4 "$1" 2>/dev/null | tr -d ' \n')" = "89504e47" ]
 }
 
+# True if $1 starts with the DOS header every Windows executable carries. A captive portal
+# or an error page served with HTTP 200 passes a plain size check, and the failure would
+# only surface later as Wine refusing to run the file.
+is_pe() {
+    [ -s "$1" ] || return 1
+    [ "$(head -c 2 "$1" 2>/dev/null)" = "MZ" ]
+}
+
 # Echo the pixel dimensions of PNG $1 as WxH, read from the IHDR header.
 png_size() {
     local w h

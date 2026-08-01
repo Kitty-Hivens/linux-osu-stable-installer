@@ -22,8 +22,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **The launcher icon is read from the bootstrapper** when the client is not unpacked yet. It carries the same icon set, up to 256x256, so a fresh installation keeps the exact icon rather than falling back to a download.
 - **`--health-check` knows the pre-first-launch state**: a missing `osu!.exe` is reported as pending rather than as a failure while the bootstrapper is in place.
 
+- **The wrapper keeps a log** at `~/.osu_wrapper.log`, rotated at 1 MiB. Launched from a desktop entry it has no terminal to print to, and a notification is gone as soon as it times out -- so everything the user is told is written there as well, together with Wine's own output from the unpack step, which is the only diagnostic that step ever produces. Failure notifications name the file.
+
 ### Fixed
 - **`pkexec` inside a container**: there is no polkit agent to answer it, so package installation used the container's passwordless `sudo` instead.
+- **A bootstrapper that is not an executable was used anyway**: only the file size was checked, so a captive portal or an error page served with HTTP 200 was stored as `osu!install.exe` and handed to Wine. It is now verified to carry the DOS header, both after downloading and before running whatever is already on disk -- an interrupted transfer leaves a file that exists and is not empty.
+- **Two launches could unpack into the same prefix at once**: selecting several beatmaps starts one wrapper per file, and the launcher can be clicked twice. The unpack is now serialised, and an invocation that waited finds the work already done instead of repeating it.
 - **Beatmaps handed to a client that was still updating**: the importer treated any running client as ready, but one just started by the bootstrapper is still downloading the game. Such a client now gets the same readiness wait as a cold start.
 - **`-h`/`--help` is handled before any prompt**, so asking for the usage text cannot trigger the container question.
 

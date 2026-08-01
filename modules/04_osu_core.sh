@@ -81,9 +81,21 @@ prepare_osu_client() {
         log_info "osu! is not unpacked yet -- the first launch will do it, at: $TARGET_OSU_EXE"
     fi
 
+    # A bootstrapper left behind by an interrupted transfer exists and is non-empty, yet Wine
+    # would refuse it -- so what is already on disk gets the same check as a fresh download.
+    if [ -f "$OSU_BOOTSTRAP_EXE" ] && ! is_pe "$OSU_BOOTSTRAP_EXE"; then
+        log_warn "Stored osu!install.exe is not a Windows executable -- discarded."
+        rm -f "$OSU_BOOTSTRAP_EXE"
+    fi
+
     if [ ! -f "$OSU_BOOTSTRAP_EXE" ]; then
         log_info "Fetching the osu! bootstrapper (not executed here)..."
-        download "https://m1.ppy.sh/r/osu!install.exe" "$OSU_BOOTSTRAP_EXE" \
+        if download "https://m1.ppy.sh/r/osu!install.exe" "$OSU_BOOTSTRAP_EXE" \
+            && ! is_pe "$OSU_BOOTSTRAP_EXE"; then
+            rm -f "$OSU_BOOTSTRAP_EXE"
+            log_warn "What m1.ppy.sh returned is not a Windows executable -- discarded."
+        fi
+        [ -f "$OSU_BOOTSTRAP_EXE" ] \
             || log_warn "Could not fetch osu!install.exe -- the first launch will retry the download."
     fi
 
@@ -373,8 +385,22 @@ TEMP_LINUX="$WINE_PREFIX/drive_c/users/$WINE_USER/Temp"
 SETTLE="${OSU_READY_SETTLE:-10}"   # grace for the beatmap subsystem after the window maps
 DEBUG="${OSU_IMPORTER_DEBUG:-0}"   # 1 = verbose notifications (per-file / launching / rescan)
 
-note() { notify-send "$@" 2>/dev/null || true; }                          # always shown
-dbg()  { [ "${DEBUG:-0}" = 1 ] && notify-send "$@" 2>/dev/null || true; }  # only when DEBUG=1
+# Launched from a desktop entry there is no terminal to print to, and a notification is gone
+# the moment it times out -- so everything the user is told is also written here, along with
+# Wine's own output from the one step that downloads anything.
+WRAPPER_LOG="$HOME/.osu_wrapper.log"
+if [ -f "$WRAPPER_LOG" ] && [ "$(stat -c%s "$WRAPPER_LOG" 2>/dev/null || echo 0)" -gt 1048576 ]; then
+    mv -f "$WRAPPER_LOG" "$WRAPPER_LOG.1" 2>/dev/null || true
+fi
+wlog() { printf '%s  %s\n' "$(date '+%F %T')" "$*" >> "$WRAPPER_LOG" 2>/dev/null || true; }
+
+note() {                                                                  # always shown
+    local msg=("$@")
+    [ "${msg[0]:-}" = "-u" ] && msg=("${msg[@]:2}")   # urgency flag is not part of the text
+    wlog "${msg[*]}"
+    notify-send "$@" 2>/dev/null || true
+}
+dbg()  { wlog "$*"; [ "${DEBUG:-0}" = 1 ] && notify-send "$@" 2>/dev/null || true; }  # notified only when DEBUG=1
 
 osu_pid()       { pgrep -f 'osu!\.exe' | head -n1; }
 osu_window_up() { hyprctl clients -j 2>/dev/null | grep -Eq '"class": *"osu!\.exe"'; }
@@ -399,20 +425,50 @@ launch_osu() {
 # and pulls the game down. The installer deliberately leaves that to the first launch, so
 # everything below has to be prepared to find no osu!.exe at all yet.
 JUST_BOOTSTRAPPED=0
+
+# Every Windows executable starts with "MZ". A captive portal or an error page answers with
+# HTTP 200 and would pass a size check, only to fail later as Wine refusing the file.
+_is_pe() {
+    [ -s "$1" ] || return 1
+    [ "$(head -c 2 "$1" 2>/dev/null)" = "MZ" ]
+}
+
 ensure_osu_installed() {
     [ -f "$OSU_LINUX" ] && return 0
 
+    # Selecting several beatmaps at once starts one wrapper per file, and the launcher can
+    # be clicked twice. Two bootstrappers unpacking into the same prefix would corrupt it.
+    if command -v flock > /dev/null 2>&1; then
+        exec 9> "$WINE_PREFIX/.osu-bootstrap.lock" || true
+        if ! flock -w 900 9; then
+            note -u critical "osu!" "Another launch is still installing osu!. Try again once it finishes."
+            return 1
+        fi
+        # The invocation we waited for may have completed the job already.
+        [ -f "$OSU_LINUX" ] && return 0
+    fi
+
     local boot="$WINE_PREFIX/osu!install.exe"
+    # Whatever is already on disk is validated too, not just a fresh download: an interrupted
+    # transfer leaves a file that exists, is non-empty, and is not an executable.
+    if [ -f "$boot" ] && ! _is_pe "$boot"; then
+        wlog "discarding a stored osu!install.exe that is not a Windows executable"
+        rm -f "$boot"
+    fi
+
     if [ ! -f "$boot" ]; then
         note "osu!" "Downloading the osu! installer..."
-        if command -v curl >/dev/null 2>&1; then
-            curl -L --fail -sS -o "$boot" "https://m1.ppy.sh/r/osu!install.exe" || rm -f "$boot"
-        elif command -v wget >/dev/null 2>&1; then
-            wget -q -O "$boot" "https://m1.ppy.sh/r/osu!install.exe" || rm -f "$boot"
+        if command -v curl > /dev/null 2>&1; then
+            curl -L --fail -sS -o "$boot" "https://m1.ppy.sh/r/osu!install.exe" >> "$WRAPPER_LOG" 2>&1
+        elif command -v wget > /dev/null 2>&1; then
+            wget -q -O "$boot" "https://m1.ppy.sh/r/osu!install.exe" >> "$WRAPPER_LOG" 2>&1
+        else
+            wlog "neither curl nor wget is installed"
         fi
-        if [ ! -s "$boot" ]; then
+        if ! _is_pe "$boot"; then
+            wlog "download failed or did not return a Windows executable"
             rm -f "$boot"
-            note -u critical "osu!" "Could not download the osu! installer. Check your connection."
+            note -u critical "osu!" "Could not download the osu! installer. Check your connection, then see $WRAPPER_LOG"
             return 1
         fi
     fi
@@ -420,21 +476,24 @@ ensure_osu_installed() {
     note "osu!" "First launch: osu! is unpacking and updating itself. The updater window may vanish at 100% -- it comes back on its own."
 
     # Sync primitives are what makes the Wine Mono updater assert during this step, and the
-    # updater is happier on XWayland than on the native driver.
+    # updater behaves better on XWayland than on the native driver. Wine's output is kept:
+    # it is the only diagnostic there is when the unpack does not finish.
     ( WINEPREFIX="$WINE_PREFIX" WINENTSYNC=0 WINEFSYNC=0 WINEESYNC=0 \
       WINEWAYLAND=0 WAYLAND_DISPLAY="" LC_ALL=en_US.UTF-8 \
-      "$WINE_BIN" "$boot" >/dev/null 2>&1 & )
+      "$WINE_BIN" "$boot" >> "$WRAPPER_LOG" 2>&1 & )
 
     local waited=0
     while [ ! -f "$OSU_LINUX" ]; do
         sleep 2
         waited=$((waited + 2))
-        if [ "$waited" -ge 300 ]; then
-            note -u critical "osu!" "osu! did not finish unpacking. Run ./install.sh --health-check to look into it."
+        [ $((waited % 30)) -eq 0 ] && wlog "still unpacking, ${waited}s elapsed"
+        if [ "$waited" -ge 900 ]; then
+            note -u critical "osu!" "osu! did not finish unpacking after 15 minutes. Details: $WRAPPER_LOG"
             return 1
         fi
     done
 
+    wlog "osu! unpacked to $OSU_LINUX after ${waited}s"
     JUST_BOOTSTRAPPED=1
     return 0
 }

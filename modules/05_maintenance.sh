@@ -127,8 +127,8 @@ run_uninstall() {
         fi
     fi
 
-    log_info "Removing installer log..."
-    rm -f "$HOME/.osu_installer.log"
+    log_info "Removing logs..."
+    rm -f "$HOME/.osu_installer.log" "$HOME/.osu_wrapper.log" "$HOME/.osu_wrapper.log.1"
 
     log_info "Uninstallation complete."
     notify_user "osu! has been fully removed from your system."
