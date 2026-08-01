@@ -434,7 +434,6 @@ launch_osu() {
 # osu! ships as a self-extracting bootstrapper, and running it is what unpacks the client
 # and pulls the game down. The installer deliberately leaves that to the first launch, so
 # everything below has to be prepared to find no osu!.exe at all yet.
-FIRST_LAUNCH_MARKER="$WINE_PREFIX/.osu-first-launch-pending"
 BOOTSTRAP_LOCK_HELD=0
 
 # Every Windows executable starts with "MZ". A captive portal or an error page answers with
@@ -538,13 +537,6 @@ ensure_osu_installed() {
     done
     wlog "osu! unpacked to $OSU_LINUX after ${waited}s"
 
-    # Any wrapper invocation, not just this one, has to know the client has never settled:
-    # a shell variable is process-local, and a second invocation started from the file
-    # manager would otherwise hand a beatmap to a client still downloading the game. Written
-    # before the lock is dropped, or an invocation released from `flock` in between would
-    # find the client present, no marker, and skip the wait.
-    : > "$FIRST_LAUNCH_MARKER" 2>/dev/null || true
-
     # Other launches only need to wait for the client to exist, not for it to be ready --
     # the readiness wait is theirs to do, and holding the lock longer would stall them.
     _release_bootstrap_lock
@@ -564,43 +556,23 @@ ensure_osu_installed() {
 }
 
 # Block until osu! is REALLY up: window mapped (UI live), then settle for the song db.
-# A first launch is a different animal: the window belongs to the updater long before the
-# game is playable, and the download behind it runs for minutes, so the settle is far
-# longer there. Nothing observable from outside says "the update finished" -- osu! exposes
-# no such signal -- so this is a bounded wait, not a guarantee, and the import below falls
-# back to dropping files into Songs when the handoff is refused.
 wait_until_ready() {
-    local i settle="$SETTLE"
-    if [ -f "$FIRST_LAUNCH_MARKER" ]; then
-        # Give the bootstrapper itself a chance to finish and hand over first.
-        for ((i=0; i<60; i++)); do
-            pgrep -x 'osu!install\.exe' >/dev/null 2>&1 || break
-            sleep 2
-        done
-        settle=$(( SETTLE > 90 ? SETTLE : 90 ))
-        wlog "first launch in progress -- waiting ${settle}s for the client to settle"
-    fi
-
+    local i
     if command -v hyprctl >/dev/null 2>&1; then
         for ((i=0; i<90; i++)); do
-            osu_window_up && { sleep "$settle"; return 0; }
+            osu_window_up && { sleep "$SETTLE"; return 0; }
             sleep 1
         done
         return 1
     fi
-    # No compositor query: wait for the process, then settle.
+    # No compositor query: wait for the process, then a generous settle.
     for ((i=0; i<90; i++)); do [ -n "$(osu_pid)" ] && break; sleep 1; done
     [ -n "$(osu_pid)" ] || return 1
-    sleep $(( settle > 12 ? settle : 12 )); return 0
+    sleep $(( SETTLE > 12 ? SETTLE : 12 )); return 0
 }
 
 require_ready() {
-    if wait_until_ready; then
-        # Whoever gets here has seen the client actually come up, so the first launch is
-        # over for every invocation, not just this one.
-        rm -f "$FIRST_LAUNCH_MARKER" 2>/dev/null || true
-        return 0
-    fi
+    wait_until_ready && return 0
     note -u critical "osu! Importer" "osu! did not finish launching; nothing imported."
     exit 1
 }
@@ -670,14 +642,10 @@ if [ "$#" -eq 0 ]; then
 fi
 
 # Files present: guarantee a fully-ready osu! before importing into it. A client that is
-# still working through its first launch is running but still downloading the game, so it
-# needs the same wait as a cold start -- having a PID is not the same as being ready to
-# accept a beatmap. The marker is on disk rather than in a variable because the invocation
-# that unpacked the client is usually not the one the file manager starts for the import.
+# already up is taken at its word -- nothing osu! exposes says whether it is done setting
+# itself up, and a handoff it refuses is caught below rather than guessed at here.
 if [ -z "$(osu_pid)" ]; then
     launch_osu
-    require_ready
-elif [ -f "$FIRST_LAUNCH_MARKER" ]; then
     require_ready
 fi
 
