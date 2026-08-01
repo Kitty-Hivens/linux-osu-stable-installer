@@ -81,10 +81,19 @@ container_running() {
 
 # Run a command in an already-running container without going through distrobox, which
 # would start it. For inspection only -- none of the desktop-session plumbing is set up.
+# The container manager execs the binary directly, so anything relying on shell builtins
+# has to be handed a shell explicitly by the caller.
 _container_probe() {
     local name="$1" mgr; shift
     mgr=$(_container_manager) || return 1
     "$mgr" exec "$name" "$@" > /dev/null 2>&1
+}
+
+# Same, but returns what the command printed. Takes a shell snippet.
+_container_probe_out() {
+    local name="$1" snippet="$2" mgr
+    mgr=$(_container_manager) || return 1
+    "$mgr" exec "$name" sh -c "$snippet" 2>/dev/null
 }
 
 ensure_container_tooling() {
@@ -152,6 +161,12 @@ _container_path() {
 create_distrobox_container() {
     if container_exists "$DISTROBOX_NAME"; then
         log_info "Using existing distrobox container '$DISTROBOX_NAME'."
+        # The image only decides what a container is built from, so asking for a different
+        # one changes nothing here. Saying so beats appearing to honour the flag.
+        if [ "${DISTROBOX_IMAGE_GIVEN:-false}" = true ]; then
+            log_warn "  --distrobox-image is ignored: '$DISTROBOX_NAME' already exists."
+            log_warn "  Rebuild it from $DISTROBOX_IMAGE with: distrobox rm --force $DISTROBOX_NAME"
+        fi
         return 0
     fi
 
@@ -255,13 +270,15 @@ bootstrap_container_deps() {
 # Set DISTROBOX_MODE/NAME/IMAGE from the command line, falling back to what the last
 # install recorded -- that is what makes a plain `--update` return to the container.
 container_prescan() {
-    local args=("$@") i=0 seen_flag=false name_given=false
+    local args=("$@") i=0 seen_flag=false name_given=false force_host=false
     CLI_WINE=""
+    DISTROBOX_IMAGE_GIVEN=false
     while [ $i -lt ${#args[@]} ]; do
         case "${args[$i]}" in
             --distrobox)       DISTROBOX_MODE=true; seen_flag=true ;;
+            --no-distrobox)    force_host=true; seen_flag=true ;;
             --distrobox-name)  i=$((i + 1)); DISTROBOX_NAME="${args[$i]:-$DISTROBOX_NAME}"; name_given=true ;;
-            --distrobox-image) i=$((i + 1)); DISTROBOX_IMAGE="${args[$i]:-$DISTROBOX_IMAGE}" ;;
+            --distrobox-image) i=$((i + 1)); DISTROBOX_IMAGE="${args[$i]:-$DISTROBOX_IMAGE}"; DISTROBOX_IMAGE_GIVEN=true ;;
             -w|--wine)         i=$((i + 1)); CLI_WINE="${args[$i]:-}" ;;
             -p|--prefix)       i=$((i + 1)); CLI_PREFIX="${args[$i]:-}" ;;
             --links-dir)       i=$((i + 1)); CLI_LINKS="${args[$i]:-}" ;;
@@ -278,6 +295,13 @@ container_prescan() {
             # container the last install happened to use.
             [ "$name_given" = false ] && DISTROBOX_NAME="$stored"
         fi
+    fi
+
+    # Once a container install is recorded, every later flagless run returns to the
+    # container. --no-distrobox is the way back to a plain host installation -- without it,
+    # removing the container by hand and re-running would silently rebuild it.
+    if [ "$force_host" = true ]; then
+        DISTROBOX_MODE=false
     fi
 }
 

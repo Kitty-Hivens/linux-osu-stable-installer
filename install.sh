@@ -65,6 +65,19 @@ if [ "$DISTROBOX_MODE" = true ] && ! container_active; then
     # Checked here, on the host: an impossible location must cost nothing, not an image
     # pull and a full dependency bootstrap before it is noticed from the inside.
     container_validate_paths
+
+    # The precheck further down runs inside the container and is therefore never reached on
+    # this path. Building a container pulls an image and a few hundred packages, so an
+    # offline host should hear about it here, not after minutes of failing downloads.
+    if ! network_available; then
+        if container_exists "$DISTROBOX_NAME"; then
+            notify_warning "No network connection.\nContinuing with the existing container, but anything that downloads will fail."
+        else
+            notify_error "No network connection, and the container still has to be built.
+That means downloading a container image and its packages, which cannot happen offline."
+        fi
+    fi
+
     if run_in_distrobox "$SCRIPT_DIR/install.sh" "$@"; then RC=0; else RC=$?; fi
     # KDE keeps its .desktop entries in ksycoca, which only the host can rebuild.
     refresh_desktop_caches

@@ -71,6 +71,27 @@ check_and_install_dependencies() {
     WINE_BIN=$(resolve_wine_bin "$WINE_SELECTION")
     export WINE="$WINE_BIN"
 
+    # Some paths above can only warn -- an image-based host, an unknown package manager, a
+    # package the distribution does not carry. A warning is not an outcome: without this the
+    # run continues, winetricks silently does nothing inside its `set +e` block, and the
+    # summary announces success over a prefix that has no runtime at all.
+    local STILL_MISSING=""
+    if [ ! -x "$WINE_BIN" ] && ! command -v "$WINE_BIN" &> /dev/null; then
+        STILL_MISSING="$STILL_MISSING wine"
+    fi
+    if ! command -v winetricks &> /dev/null; then
+        if [[ "$DOTNET_SELECTION" != *"Mono"* ]] || [[ "$RENDERER_SELECTION" == *"DXVK"* ]]; then
+            STILL_MISSING="$STILL_MISSING winetricks"
+        fi
+    fi
+    if [ -n "$STILL_MISSING" ]; then
+        notify_error "Still missing after the dependency step:$STILL_MISSING
+
+Nothing further would work: MS .NET 4.8 and DXVK are installed through winetricks, and
+Wine runs everything. Install them by hand, or re-run with --distrobox to have them put
+into a container instead."
+    fi
+
     if [ "$DRIVERS_INSTALLED" = true ]; then
         notify_warning "System GPU drivers were updated.\nPlease reboot your computer and run the script again."
         exit 0

@@ -538,14 +538,16 @@ ensure_osu_installed() {
     done
     wlog "osu! unpacked to $OSU_LINUX after ${waited}s"
 
-    # Other launches only need to wait for the client to exist, not for it to be ready --
-    # the readiness wait below is theirs to do, and holding the lock longer would stall them.
-    _release_bootstrap_lock
-
     # Any wrapper invocation, not just this one, has to know the client has never settled:
-    # the flag below is process-local, and a second invocation started from the file manager
-    # would otherwise hand a beatmap to a client that is still downloading the game.
+    # a shell variable is process-local, and a second invocation started from the file
+    # manager would otherwise hand a beatmap to a client still downloading the game. Written
+    # before the lock is dropped, or an invocation released from `flock` in between would
+    # find the client present, no marker, and skip the wait.
     : > "$FIRST_LAUNCH_MARKER" 2>/dev/null || true
+
+    # Other launches only need to wait for the client to exist, not for it to be ready --
+    # the readiness wait is theirs to do, and holding the lock longer would stall them.
+    _release_bootstrap_lock
 
     # osu!.exe exists a moment before the bootstrapper hands over to it and exits. Returning
     # in that gap would leave the launcher below convinced nothing is running, and a second
@@ -562,19 +564,34 @@ ensure_osu_installed() {
 }
 
 # Block until osu! is REALLY up: window mapped (UI live), then settle for the song db.
+# A first launch is a different animal: the window belongs to the updater long before the
+# game is playable, and the download behind it runs for minutes, so the settle is far
+# longer there. Nothing observable from outside says "the update finished" -- osu! exposes
+# no such signal -- so this is a bounded wait, not a guarantee, and the import below falls
+# back to dropping files into Songs when the handoff is refused.
 wait_until_ready() {
-    local i
+    local i settle="$SETTLE"
+    if [ -f "$FIRST_LAUNCH_MARKER" ]; then
+        # Give the bootstrapper itself a chance to finish and hand over first.
+        for ((i=0; i<60; i++)); do
+            pgrep -x 'osu!install\.exe' >/dev/null 2>&1 || break
+            sleep 2
+        done
+        settle=$(( SETTLE > 90 ? SETTLE : 90 ))
+        wlog "first launch in progress -- waiting ${settle}s for the client to settle"
+    fi
+
     if command -v hyprctl >/dev/null 2>&1; then
         for ((i=0; i<90; i++)); do
-            osu_window_up && { sleep "$SETTLE"; return 0; }
+            osu_window_up && { sleep "$settle"; return 0; }
             sleep 1
         done
         return 1
     fi
-    # No compositor query: wait for the process, then a generous settle.
+    # No compositor query: wait for the process, then settle.
     for ((i=0; i<90; i++)); do [ -n "$(osu_pid)" ] && break; sleep 1; done
     [ -n "$(osu_pid)" ] || return 1
-    sleep $(( SETTLE > 12 ? SETTLE : 12 )); return 0
+    sleep $(( settle > 12 ? settle : 12 )); return 0
 }
 
 require_ready() {
@@ -600,7 +617,20 @@ import_file() {
         [[ "$name" == *.osz ]] && rm -f "$file"
         dbg "osu! Importer" "Imported: $name"
     else
-        note -u critical "osu! Importer" "Failed: $name"
+        # Handing a file to the client can be refused while it is still setting itself up.
+        # A beatmap does not need the client for that: dropped into Songs it is picked up by
+        # the next full scan, which any restart performs anyway. Losing the file is the one
+        # outcome that would be unacceptable.
+        if [[ "${name,,}" == *.osz ]]; then
+            local songs="$(dirname "$OSU_LINUX")/Songs"
+            mkdir -p "$songs"
+            if cp -f "$file" "$songs/"; then
+                rm -f "$file"
+                note "osu! Importer" "$name could not be handed to osu! -- queued in Songs, it appears after a restart or F5."
+                return 0
+            fi
+        fi
+        note -u critical "osu! Importer" "Failed: $name -- see $WRAPPER_LOG"
         return 1
     fi
 }

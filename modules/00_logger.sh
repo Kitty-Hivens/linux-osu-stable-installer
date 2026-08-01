@@ -77,9 +77,17 @@ network_available() {
     fi
 
     # curl is itself one of the packages the dependency step installs, so on a bare system
-    # fall back to a plain TCP connect rather than reporting the machine as offline.
+    # fall back to a plain TCP connect rather than reporting the machine as offline. It gets
+    # an explicit deadline: a blackholed network drops the SYN silently, and the kernel would
+    # otherwise retry for minutes -- in a check whose whole purpose is to fail quickly.
     for host in m1.ppy.sh github.com; do
-        (exec 3<>"/dev/tcp/$host/443") 2>/dev/null && return 0
+        if command -v timeout &> /dev/null && command -v bash &> /dev/null; then
+            timeout 8 bash -c 'exec 3<>"/dev/tcp/$0/443"' "$host" 2>/dev/null && return 0
+        else
+            # Nothing external is available to bound this one -- the probe is a shell
+            # builtin precisely so it still works there, at the mercy of the SYN retries.
+            (exec 3<>"/dev/tcp/$host/443") 2>/dev/null && return 0
+        fi
     done
     return 1
 }

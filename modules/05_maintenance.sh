@@ -178,8 +178,18 @@ run_health_check() {
         _check "Config file" "fail" "Not found at $CONFIG_FILE"
     fi
 
-    # Wine binary
-    if [ -n "$WINE_BIN" ] && command -v "$WINE_BIN" &> /dev/null; then
+    local BOX="${INSTALLER_DISTROBOX_NAME:-}"
+
+    # Wine. In container mode WINE_BIN is a shim that reaches into the container, so running
+    # it would start the container -- which a check promising to change nothing must not do.
+    # The version is read further down instead, and only if the container is up anyway.
+    if [ -n "$BOX" ]; then
+        if [ -x "${WINE_BIN:-}" ]; then
+            _check "Wine launcher shim" "ok" ""
+        else
+            _check "Wine launcher shim" "fail" "Not executable: ${WINE_BIN:-unset}"
+        fi
+    elif [ -n "$WINE_BIN" ] && command -v "$WINE_BIN" &> /dev/null; then
         local WINE_VER
         WINE_VER=$("$WINE_BIN" --version 2>/dev/null || echo "unknown")
         _check "Wine binary ($WINE_VER)" "ok" ""
@@ -262,7 +272,6 @@ run_health_check() {
 
     # Container, when this installation lives in one. Everything below the shims depends
     # on it, so a missing container explains every other Wine-side failure at once.
-    local BOX="${INSTALLER_DISTROBOX_NAME:-}"
     if [ -n "$BOX" ]; then
         DISTROBOX_NAME="$BOX"
         if container_exists "$BOX"; then
@@ -272,19 +281,25 @@ run_health_check() {
         fi
     fi
 
-    # winetricks -- in container mode it is installed inside the container, not on the host.
-    # A health check promises to change nothing, so a stopped container is reported as such
-    # rather than started just to look inside it.
+    # winetricks and Wine live inside the container. A health check promises to change
+    # nothing, so a stopped container is reported as such rather than started to look inside.
+    # Probes go through a shell: `command` is a builtin, and the container manager execs the
+    # binary directly, with no shell to interpret it.
     if [ -n "$BOX" ]; then
         if ! container_exists "$BOX"; then
             _check "winetricks" "fail" "The container is gone, so nothing inside it can be checked"
         elif ! container_running "$BOX"; then
             _check "winetricks (container stopped)" "ok" ""
             log_info "  Container '$BOX' is stopped -- start it to check what is installed inside."
-        elif _container_probe "$BOX" command -v winetricks; then
-            _check "winetricks" "ok" ""
         else
-            _check "winetricks" "fail" "Not found inside the container"
+            local BOX_WINE
+            BOX_WINE=$(_container_probe_out "$BOX" 'wine --version' | tr -d '\r')
+            [ -n "$BOX_WINE" ] && log_info "  Wine inside the container: $BOX_WINE"
+            if _container_probe "$BOX" sh -c 'command -v winetricks'; then
+                _check "winetricks" "ok" ""
+            else
+                _check "winetricks" "fail" "Not found inside the container"
+            fi
         fi
     elif command -v winetricks &> /dev/null; then
         _check "winetricks" "ok" ""

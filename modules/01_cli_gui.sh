@@ -44,6 +44,7 @@ Installation Options:
 Container mode (immutable hosts such as Bazzite, Silverblue, SteamOS):
       --distrobox        Install Wine into a distrobox container instead of the system.
                          Needs distrobox and podman, both preinstalled on those systems.
+      --no-distrobox     Install on the host even though a container install is recorded
       --distrobox-name N Container name (default: osu-stable)
       --distrobox-image I Container image (default: docker.io/library/archlinux:latest)
 
@@ -104,6 +105,7 @@ parse_cli() {
                 shift ;;
             --links-dir) LINKS_DIR="$2"; USER_SET_LINKS=true; shift ;;
             --distrobox)        DISTROBOX_MODE=true ;;
+            --no-distrobox)     DISTROBOX_MODE=false ;;
             --distrobox-name)   DISTROBOX_NAME="$2";  shift ;;
             --distrobox-image)  DISTROBOX_IMAGE="$2"; shift ;;
             --no-sync)      ENABLE_FSYNC="FALSE";     USER_SET_FSYNC=true ;;
