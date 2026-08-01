@@ -26,8 +26,9 @@ Uses `gum` for a clean terminal (TUI) configuration dashboard. Fully unattended 
 ## System Requirements
 
 - **OS:** Linux (Arch, Debian, Fedora, Void, or derivatives). Image-based systems are covered by container mode.
-- **Dependencies:** `curl`, `unzip`, `winetricks`, `icoutils`, `gum` — installed automatically on supported distros.
-- **Wine:** `wine-staging` recommended (and the default). Standard `wine` is supported.
+- **Dependencies:** `curl`, `unzip`, `winetricks`, `icoutils` — installed automatically on supported distros (plus `alsa-utils` if the ALSA backend is chosen).
+- **`gum`:** optional and *not* installed for you — it is missing from several distributions' repositories. Without it the configuration dashboard is skipped and the defaults, or whatever CLI flags were passed, are used.
+- **Wine:** `wine-staging` is preferred and is preselected when the Wine already on the system is a staging build; otherwise the distribution's `wine` package is installed. Any binary or path can be forced with `-w`.
 - **Network:** required. The client, MS .NET 4.8, the system packages, the fonts and the RPC bridge are all downloaded during setup, so there is no offline installation. The installer checks this up front instead of failing part-way through.
 
 > **NixOS users:** First-class via the bundled Nix flake — Nix supplies every dependency, no manual setup. See [NixOS](#nixos).
@@ -53,7 +54,7 @@ These distributions are built from an image: packages are layered into the *next
 ./install.sh --distrobox
 ```
 
-The installer creates a distrobox container, installs Wine staging, `winetricks`, the 32-bit graphics/audio libraries and the fonts inside it, then re-runs itself in there. `$HOME` is shared with the container, so the prefix, the config, the desktop entry, the MIME handlers and the `~/osu` symlinks all land on the host exactly as in a normal install.
+The installer creates a distrobox container and, on the default Arch image, installs Wine staging, `winetricks`, the 32-bit graphics/audio libraries and the fonts inside it, then re-runs itself in there. `$HOME` is shared with the container, so the prefix, the config, the desktop entry, the MIME handlers and the `~/osu` symlinks all land on the host exactly as in a normal install.
 
 The desktop entry points at shims in `~/.config/osu-importer/hostbin/`, which reach into the container. Launching osu! from the application menu and double-clicking a `.osz` therefore work from the host as usual.
 
@@ -88,7 +89,7 @@ On first run, an interactive terminal dashboard appears (powered by `gum`):
 | Parameter | Description |
 | :--- | :--- |
 | **Install Location** | Wine prefix directory. Default: `~/.wine-osu` |
-| **Wine Binary** | Auto-detects `wine-staging`. Custom paths (Proton, Wine-GE) can be specified. |
+| **Wine Binary** | Preselects `wine-staging` when the installed Wine is a staging build, otherwise `wine`. Custom paths (Proton, Wine-GE) can be specified. |
 | **Graphics API** | **OpenGL** — standard renderer, good for older hardware. **DXVK** — Vulkan translation, recommended for modern GPUs. |
 | **Window Driver** | **Wayland** (default) — native Wine driver, no XWayland overhead. **X11** — fallback for maximum compositor compatibility. |
 | **Fonts** | Replaces the Windows UI font to fix CJK character rendering in beatmap lists and chat. |
@@ -117,6 +118,7 @@ Installation:
       --no-gamemode      Disable GameMode integration
       --links-dir DIR    Symlink directory (default: ~/osu)
   -s, --silent           Unattended mode, no TUI
+  -h, --help             Show usage
 
 Container mode (immutable hosts):
       --distrobox        Install Wine into a distrobox container
@@ -163,7 +165,26 @@ If any of those directories already existed as real folders, the installer backs
 
 ### Importing Beatmaps
 
-Double-click a `.osz`, `.osk`, or `.osr` in your file manager and it imports into the running osu! (the game is launched first if it is not already open). Selecting several `.osz` at once batch-imports them in a single in-game pass instead of one pop-up per file. Notifications are quiet by default — set `OSU_IMPORTER_DEBUG=1` in the config for per-file detail.
+Double-click a `.osz`, `.osk`, or `.osr` in your file manager and it imports into the running osu! (the game is launched first if it is not already open, and unpacked first if this is the very first launch). Selecting several `.osz` at once batch-imports them in a single in-game pass instead of one pop-up per file. Notifications are quiet by default — set `OSU_IMPORTER_DEBUG=1` in the config for per-file detail.
+
+Beatmaps copied into `Songs/` by other means are not noticed until osu! rescans. The wrapper can trigger that scan, which is the in-game F5 and therefore only takes effect on the song-select screen:
+
+```bash
+~/.config/osu-importer/osu_importer_wrapper.sh --rescan
+```
+
+It needs `ydotool` with `ydotoold` running, since osu! offers no way to request a rescan from outside. If the game is not running, it is simply started — a cold start scans `Songs/` anyway.
+
+### Logs
+
+Two files, both rotated at 1 MiB:
+
+| File | What it holds |
+| :--- | :--- |
+| `~/.osu_installer.log` | every installer run |
+| `~/.osu_wrapper.log` | every launch and import, plus Wine's output from the first-launch unpack |
+
+The wrapper runs from a desktop entry with no terminal attached, so its log is where a failed launch or a failed import is explained — a notification is gone by the time you go looking.
 
 ### Tweaking Settings
 
@@ -203,6 +224,7 @@ rm -f ~/.local/share/applications/osu-stable.desktop
 rm -f ~/.local/share/applications/osu-importer.desktop
 rm -f ~/.local/share/mime/packages/osu-file-types.xml
 rm -rf ~/.config/osu-importer
+rm -f ~/.osu_installer.log ~/.osu_wrapper.log
 # Remove symlinks:
 rm -f ~/osu/Songs ~/osu/Skins ~/osu/Logs ~/osu/Chat
 # Container mode only:
