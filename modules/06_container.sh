@@ -21,11 +21,16 @@ container_active() {
         || [ -n "${CONTAINER_ID:-}" ] || [ -n "${DISTROBOX_ENTER_PATH:-}" ]
 }
 
-# True on image-based systems where package installs need root plus a reboot.
+# True on image-based systems where package installs need root plus a reboot. SteamOS is not
+# ostree-based -- it swaps A/B partitions and keeps the root filesystem read-only -- so it is
+# matched by name, and both ID and VARIANT_ID are checked because distributions disagree
+# about which one carries the recognisable value.
 host_is_immutable() {
     [ -f /run/ostree-booted ] && return 0
     command -v rpm-ostree &> /dev/null && return 0
-    grep -qiE '^VARIANT_ID=.*(silverblue|kinoite|sericea|onyx|coreos|bazzite|steamos)' /etc/os-release 2>/dev/null
+    command -v steamos-readonly &> /dev/null && return 0
+    grep -qiE '^(ID|VARIANT_ID)=.*(silverblue|kinoite|sericea|onyx|coreos|bazzite|steamos|steamdeck)' \
+        /etc/os-release 2>/dev/null
 }
 
 _host_has_nvidia() {
@@ -65,6 +70,21 @@ container_exists() {
     else
         docker container inspect "$name" &> /dev/null
     fi
+}
+
+# True when the container is not merely defined but currently up.
+container_running() {
+    local name="$1" mgr
+    mgr=$(_container_manager) || return 1
+    [ "$("$mgr" inspect --type container --format '{{.State.Status}}' "$name" 2>/dev/null)" = "running" ]
+}
+
+# Run a command in an already-running container without going through distrobox, which
+# would start it. For inspection only -- none of the desktop-session plumbing is set up.
+_container_probe() {
+    local name="$1" mgr; shift
+    mgr=$(_container_manager) || return 1
+    "$mgr" exec "$name" "$@" > /dev/null 2>&1
 }
 
 ensure_container_tooling() {
@@ -235,12 +255,16 @@ bootstrap_container_deps() {
 # Set DISTROBOX_MODE/NAME/IMAGE from the command line, falling back to what the last
 # install recorded -- that is what makes a plain `--update` return to the container.
 container_prescan() {
-    local args=("$@") i=0 seen_flag=false
+    local args=("$@") i=0 seen_flag=false name_given=false
+    CLI_WINE=""
     while [ $i -lt ${#args[@]} ]; do
         case "${args[$i]}" in
             --distrobox)       DISTROBOX_MODE=true; seen_flag=true ;;
-            --distrobox-name)  i=$((i + 1)); DISTROBOX_NAME="${args[$i]:-$DISTROBOX_NAME}" ;;
+            --distrobox-name)  i=$((i + 1)); DISTROBOX_NAME="${args[$i]:-$DISTROBOX_NAME}"; name_given=true ;;
             --distrobox-image) i=$((i + 1)); DISTROBOX_IMAGE="${args[$i]:-$DISTROBOX_IMAGE}" ;;
+            -w|--wine)         i=$((i + 1)); CLI_WINE="${args[$i]:-}" ;;
+            -p|--prefix)       i=$((i + 1)); CLI_PREFIX="${args[$i]:-}" ;;
+            --links-dir)       i=$((i + 1)); CLI_LINKS="${args[$i]:-}" ;;
         esac
         i=$((i + 1))
     done
@@ -250,7 +274,9 @@ container_prescan() {
         stored=$(_get_stored "$HOME/.config/osu-importer/osu-env.conf" INSTALLER_DISTROBOX_NAME 2>/dev/null) || stored=""
         if [ -n "$stored" ]; then
             DISTROBOX_MODE=true
-            DISTROBOX_NAME="$stored"
+            # A name given on the command line is a deliberate choice and outranks the
+            # container the last install happened to use.
+            [ "$name_given" = false ] && DISTROBOX_NAME="$stored"
         fi
     fi
 }
@@ -283,6 +309,10 @@ Put the repository somewhere under $HOME and run it again."
 # dependency step with a package manager error.
 container_offer_fallback() {
     command -v wine &> /dev/null && return 0
+    # A Wine passed with -w is the user's answer to this very question, and it is parsed
+    # only later -- without checking it here, a working custom build would still be met
+    # with a container prompt, and declining would abort the run.
+    [ -n "${CLI_WINE:-}" ] && [ -x "${CLI_WINE:-}" ] && return 0
     host_is_immutable || return 0
 
     log_warn "This system installs packages through an image (ostree), and Wine is not present."
@@ -306,18 +336,24 @@ Re-run with --distrobox to put Wine into a container instead."
     esac
 }
 
-# The prefix has to be a host path the container sees at the same location, or the whole
-# installation would silently land inside the container and vanish with it.
+# $HOME is the one thing the container and the host genuinely share, at the same path. A
+# location outside it may well exist inside the container image too -- /opt and /mnt usually
+# do -- and the installation would then land in the container's own filesystem and vanish
+# with it, which is precisely the outcome that must not happen silently. Checked on the host
+# before anything is created, so an impossible path costs no image pull.
 container_validate_paths() {
-    local path parent
-    for path in "$WINE_PREFIX" "$LINKS_DIR"; do
+    local path label
+    for label in "prefix:${CLI_PREFIX:-$WINE_PREFIX}" "symlink directory:${CLI_LINKS:-$LINKS_DIR}"; do
+        path="${label#*:}"
+        [ -n "$path" ] || continue
         case "$path" in
             "$HOME"|"$HOME"/*) continue ;;
         esac
-        parent=$(dirname "$path")
-        [ -d "$parent" ] || notify_error "In --distrobox mode '$path' is not visible inside the container.
-Choose a location under $HOME instead."
-        log_warn "'$path' sits outside \$HOME -- verify the container really shares $parent."
+        notify_error "In --distrobox mode the ${label%%:*} has to live under $HOME, which is what the
+container shares with the host. Requested: $path
+
+Anywhere else either does not exist inside the container, or is the container's own
+directory -- the installation would then disappear together with the container."
     done
 }
 

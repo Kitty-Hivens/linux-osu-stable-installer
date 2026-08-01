@@ -62,6 +62,9 @@ if [ "$DISTROBOX_MODE" = false ] && ! container_active; then
     container_offer_fallback
 fi
 if [ "$DISTROBOX_MODE" = true ] && ! container_active; then
+    # Checked here, on the host: an impossible location must cost nothing, not an image
+    # pull and a full dependency bootstrap before it is noticed from the inside.
+    container_validate_paths
     if run_in_distrobox "$SCRIPT_DIR/install.sh" "$@"; then RC=0; else RC=$?; fi
     # KDE keeps its .desktop entries in ksycoca, which only the host can rebuild.
     refresh_desktop_caches
@@ -81,7 +84,10 @@ fi
 # the .NET step. A prefix that already carries osu! is only warned about: re-applying
 # settings offline is legitimate, individual downloads just get skipped.
 if ! network_available; then
-    if [ -f "$(osu_expected_exe)" ]; then
+    # An installation that already exists is anything but a bare machine: the client, or the
+    # bootstrapper waiting for its first launch, or at the very least a built prefix. Only a
+    # genuinely fresh install has no offline path at all.
+    if [ -f "$(osu_expected_exe)" ] || [ -f "$WINE_PREFIX/osu!install.exe" ] || [ -d "$WINE_PREFIX/drive_c" ]; then
         notify_warning "No network connection.
 Continuing, but anything that downloads -- fonts, the Discord RPC bridge, icons -- will be skipped or fail."
     else

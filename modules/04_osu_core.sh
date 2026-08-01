@@ -434,13 +434,22 @@ launch_osu() {
 # osu! ships as a self-extracting bootstrapper, and running it is what unpacks the client
 # and pulls the game down. The installer deliberately leaves that to the first launch, so
 # everything below has to be prepared to find no osu!.exe at all yet.
-JUST_BOOTSTRAPPED=0
+FIRST_LAUNCH_MARKER="$WINE_PREFIX/.osu-first-launch-pending"
+BOOTSTRAP_LOCK_HELD=0
 
 # Every Windows executable starts with "MZ". A captive portal or an error page answers with
 # HTTP 200 and would pass a size check, only to fail later as Wine refusing the file.
 _is_pe() {
     [ -s "$1" ] || return 1
     [ "$(head -c 2 "$1" 2>/dev/null)" = "MZ" ]
+}
+
+# Drop the bootstrap lock and the descriptor carrying it. Safe to call when no lock is held.
+_release_bootstrap_lock() {
+    [ "${BOOTSTRAP_LOCK_HELD:-0}" = 1 ] || return 0
+    flock -u 9 2>/dev/null || true
+    exec 9>&-
+    BOOTSTRAP_LOCK_HELD=0
 }
 
 ensure_osu_installed() {
@@ -453,12 +462,17 @@ ensure_osu_installed() {
     local lock="$WINE_PREFIX/.osu-bootstrap.lock"
     if command -v flock > /dev/null 2>&1 && : > "$lock" 2>/dev/null; then
         exec 9> "$lock"
+        BOOTSTRAP_LOCK_HELD=1
         if ! flock -w 900 9; then
             note -u critical "osu!" "Another launch is still installing osu!. Try again once it finishes."
+            _release_bootstrap_lock
             return 1
         fi
         # The invocation we waited for may have completed the job already.
-        [ -f "$OSU_LINUX" ] && return 0
+        if [ -f "$OSU_LINUX" ]; then
+            _release_bootstrap_lock
+            return 0
+        fi
     fi
 
     local boot="$WINE_PREFIX/osu!install.exe"
@@ -482,18 +496,24 @@ ensure_osu_installed() {
             wlog "download failed or did not return a Windows executable"
             rm -f "$boot"
             note -u critical "osu!" "Could not download the osu! installer. Check your connection, then see $WRAPPER_LOG"
+            _release_bootstrap_lock
             return 1
         fi
     fi
 
     note "osu!" "First launch: osu! is unpacking and updating itself. The updater window may vanish at 100% -- it comes back on its own."
 
+    # A flock lives on the open file description, so any process inheriting the descriptor
+    # keeps holding it. The bootstrapper hands over to the client, which would then hold the
+    # lock for the whole game session and make every other launch wait it out -- 9>&- closes
+    # the descriptor in the child so only this function owns the lock.
+    #
     # Sync primitives are what makes the Wine Mono updater assert during this step, and the
     # updater behaves better on XWayland than on the native driver. Wine's output is kept:
     # it is the only diagnostic there is when the unpack does not finish.
     ( WINEPREFIX="$WINE_PREFIX" WINENTSYNC=0 WINEFSYNC=0 WINEESYNC=0 \
       WINEWAYLAND=0 WAYLAND_DISPLAY="" LC_ALL=en_US.UTF-8 \
-      "$WINE_BIN" "$boot" >> "$WRAPPER_LOG" 2>&1 ) &
+      "$WINE_BIN" "$boot" >> "$WRAPPER_LOG" 2>&1 9>&- ) &
     local boot_pid=$!
 
     local waited=0
@@ -501,12 +521,31 @@ ensure_osu_installed() {
         sleep 2
         waited=$((waited + 2))
         [ $((waited % 30)) -eq 0 ] && wlog "still unpacking, ${waited}s elapsed"
+        # A bootstrapper that died without producing the client will never produce it;
+        # waiting out the full deadline would only hide the reason for a quarter of an hour.
+        if ! kill -0 "$boot_pid" 2>/dev/null; then
+            sleep 3
+            [ -f "$OSU_LINUX" ] && break
+            note -u critical "osu!" "The osu! installer stopped without unpacking the game. Details: $WRAPPER_LOG"
+            _release_bootstrap_lock
+            return 1
+        fi
         if [ "$waited" -ge 900 ]; then
             note -u critical "osu!" "osu! did not finish unpacking after 15 minutes. Details: $WRAPPER_LOG"
+            _release_bootstrap_lock
             return 1
         fi
     done
     wlog "osu! unpacked to $OSU_LINUX after ${waited}s"
+
+    # Other launches only need to wait for the client to exist, not for it to be ready --
+    # the readiness wait below is theirs to do, and holding the lock longer would stall them.
+    _release_bootstrap_lock
+
+    # Any wrapper invocation, not just this one, has to know the client has never settled:
+    # the flag below is process-local, and a second invocation started from the file manager
+    # would otherwise hand a beatmap to a client that is still downloading the game.
+    : > "$FIRST_LAUNCH_MARKER" 2>/dev/null || true
 
     # osu!.exe exists a moment before the bootstrapper hands over to it and exits. Returning
     # in that gap would leave the launcher below convinced nothing is running, and a second
@@ -519,7 +558,6 @@ ensure_osu_installed() {
         settle=$((settle + 1))
     done
 
-    JUST_BOOTSTRAPPED=1
     return 0
 }
 
@@ -540,7 +578,12 @@ wait_until_ready() {
 }
 
 require_ready() {
-    wait_until_ready && return 0
+    if wait_until_ready; then
+        # Whoever gets here has seen the client actually come up, so the first launch is
+        # over for every invocation, not just this one.
+        rm -f "$FIRST_LAUNCH_MARKER" 2>/dev/null || true
+        return 0
+    fi
     note -u critical "osu! Importer" "osu! did not finish launching; nothing imported."
     exit 1
 }
@@ -596,13 +639,15 @@ if [ "$#" -eq 0 ]; then
     exit 0
 fi
 
-# Files present: guarantee a fully-ready osu! before importing into it. A client the
-# bootstrapper started for us is running but still updating, so it needs the same wait as
-# a cold start -- having a PID is not the same as being ready to accept a beatmap.
+# Files present: guarantee a fully-ready osu! before importing into it. A client that is
+# still working through its first launch is running but still downloading the game, so it
+# needs the same wait as a cold start -- having a PID is not the same as being ready to
+# accept a beatmap. The marker is on disk rather than in a variable because the invocation
+# that unpacked the client is usually not the one the file manager starts for the import.
 if [ -z "$(osu_pid)" ]; then
     launch_osu
     require_ready
-elif [ "$JUST_BOOTSTRAPPED" = 1 ]; then
+elif [ -f "$FIRST_LAUNCH_MARKER" ]; then
     require_ready
 fi
 

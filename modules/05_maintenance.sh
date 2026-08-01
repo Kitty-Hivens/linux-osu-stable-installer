@@ -9,9 +9,15 @@
 
 run_update() {
     # init_config has already restored the prior selections via load_installer_state
-    # and resolved WINE_BIN — we just need to make sure TARGET_OSU_EXE is set.
-    if [ -z "${TARGET_OSU_EXE:-}" ] || [ ! -f "${TARGET_OSU_EXE:-/nonexistent}" ]; then
-        notify_error "Cannot locate osu!.exe for update. Run a fresh install first."
+    # and resolved WINE_BIN — we just need a client path to re-point everything at.
+    # Between installing and the first launch the client is not unpacked yet, which is a
+    # normal state and not a reason to refuse: the bootstrapper standing by is enough.
+    if [ -z "${TARGET_OSU_EXE:-}" ]; then
+        notify_error "No installation to update: the stored configuration has no client path."
+    fi
+    if [ ! -f "$TARGET_OSU_EXE" ] && [ ! -f "$WINE_PREFIX/osu!install.exe" ]; then
+        notify_error "Cannot locate osu! for update -- neither the client nor its bootstrapper is in the prefix.
+Run a fresh install first."
     fi
 
     log_info "Update Mode: re-applying settings to existing installation."
@@ -267,16 +273,23 @@ run_health_check() {
     fi
 
     # winetricks -- in container mode it is installed inside the container, not on the host.
-    local TRICKS_OK=false
+    # A health check promises to change nothing, so a stopped container is reported as such
+    # rather than started just to look inside it.
     if [ -n "$BOX" ]; then
-        container_exists "$BOX" && _container_exec bash -c 'command -v winetricks' &> /dev/null && TRICKS_OK=true
+        if ! container_exists "$BOX"; then
+            _check "winetricks" "fail" "The container is gone, so nothing inside it can be checked"
+        elif ! container_running "$BOX"; then
+            _check "winetricks (container stopped)" "ok" ""
+            log_info "  Container '$BOX' is stopped -- start it to check what is installed inside."
+        elif _container_probe "$BOX" command -v winetricks; then
+            _check "winetricks" "ok" ""
+        else
+            _check "winetricks" "fail" "Not found inside the container"
+        fi
     elif command -v winetricks &> /dev/null; then
-        TRICKS_OK=true
-    fi
-    if [ "$TRICKS_OK" = true ]; then
         _check "winetricks" "ok" ""
     else
-        _check "winetricks" "fail" "Not found${BOX:+ inside the container}"
+        _check "winetricks" "fail" "Not found in PATH"
     fi
 
     # Summary
@@ -392,7 +405,15 @@ launch_osu() {
         exit 1
     fi
 
+    # Before the first launch the client is not unpacked, and the wrapper is the only thing
+    # that knows how to do that. Hand over rather than refusing what the flag promises.
     if [ ! -f "$OSU_LINUX" ]; then
+        local WRAPPER="$HOME/.config/osu-importer/osu_importer_wrapper.sh"
+        if [ -f "$WINE_PREFIX/osu!install.exe" ] && [ -x "$WRAPPER" ]; then
+            echo "[INFO] osu! is not unpacked yet -- handing over to the wrapper for the first launch."
+            echo "[INFO] Wine output goes to ~/.osu_wrapper.log, not to this terminal."
+            exec "$WRAPPER"
+        fi
         echo "[ERROR] osu!.exe not found at: $OSU_LINUX"
         echo "        The prefix may have been moved or deleted."
         exit 1
