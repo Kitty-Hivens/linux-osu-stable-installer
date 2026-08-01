@@ -41,6 +41,8 @@ chmod +x install.sh
 ./install.sh
 ```
 
+The installer prepares the environment and exits — it never opens the game. osu! ships as a self-extracting bootstrapper, and the **first launch** is what unpacks the client and downloads the game, which is why installing is fully unattended and the first start takes a few minutes.
+
 > **Security note:** Root privileges (via `pkexec`) are requested **only** to install missing system packages. osu! itself is installed entirely in the user's home directory. On immutable systems even that request goes away — see below.
 
 ### Immutable systems (Bazzite, Silverblue, Kinoite, SteamOS)

@@ -17,8 +17,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **Network precheck before anything is set up**: every step of an installation downloads something -- system packages, MS .NET 4.8 through winetricks, the osu! client, fonts, the RPC bridge, the icons -- so a missing connection used to surface late and differently at each step, worst of all several minutes into the .NET install. A fresh installation now stops immediately with the reason; a prefix that already carries osu! is only warned, since re-applying settings offline is legitimate. Only the hosts the installer actually downloads from are probed, and `curl`'s absence on a bare system falls back to a plain TCP connect instead of reporting the machine as offline.
 
+### Changed
+- **The osu! client is unpacked on first launch, not during installation**: osu! ships as a self-extracting bootstrapper, and running it is what downloads the game. The installer used to run it and then block until the user reached the main menu and closed the game -- the one step that could not work unattended, and the reason `--silent` was never truly silent. Installing now stops at preparing the environment, and the wrapper unpacks the client the first time osu! is started. As a side effect a prefix restored from a backup, or one whose client was deleted, repairs itself on the next launch instead of needing `--update`.
+- **The launcher icon is read from the bootstrapper** when the client is not unpacked yet. It carries the same icon set, up to 256x256, so a fresh installation keeps the exact icon rather than falling back to a download.
+- **`--health-check` knows the pre-first-launch state**: a missing `osu!.exe` is reported as pending rather than as a failure while the bootstrapper is in place.
+
 ### Fixed
 - **`pkexec` inside a container**: there is no polkit agent to answer it, so package installation used the container's passwordless `sudo` instead.
+- **Beatmaps handed to a client that was still updating**: the importer treated any running client as ready, but one just started by the bootstrapper is still downloading the game. Such a client now gets the same readiness wait as a cold start.
 - **`-h`/`--help` is handled before any prompt**, so asking for the usage text cannot trigger the container question.
 
 ---

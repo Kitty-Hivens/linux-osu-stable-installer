@@ -114,8 +114,8 @@ if [ "$INSTALL_RPC_BOOL" = "TRUE" ]; then
     install_discord_rpc
 fi
 
-# 7. Download and perform initial osu! setup
-install_osu_client
+# 7. Put the osu! bootstrapper in place. The client unpacks itself on first launch.
+prepare_osu_client
 
 # 8. Generate config, desktop integration, and symlinks
 create_system_integration
@@ -124,9 +124,10 @@ create_osu_symlinks
 log_info "Installation workflow completed successfully."
 
 if [ "$SILENT_MODE" = false ]; then
-    notify_user "Installation Complete!\n\nLaunch osu! from your application menu.\n\nData shortcuts are available at: $LINKS_DIR\nTweak settings at: ~/.config/osu-importer/osu-env.conf"
+    notify_user "Installation Complete!\n\nLaunch osu! from your application menu.\nThe first launch unpacks the client and downloads the game -- give it a few minutes.\n\nData shortcuts are available at: $LINKS_DIR\nTweak settings at: ~/.config/osu-importer/osu-env.conf"
 else
     echo -e "\n[SUCCESS] osu! installation complete! Find it in your app menu."
+    echo "First launch:  unpacks the client and downloads the game -- give it a few minutes."
     echo "Symlinks:  $LINKS_DIR"
     echo "Config:    ~/.config/osu-importer/osu-env.conf"
 fi

@@ -184,11 +184,14 @@ run_health_check() {
         _check "Wine prefix" "fail" "Directory not found: ${WINE_PREFIX:-unset}"
     fi
 
-    # osu!.exe
+    # osu! client. Before the first launch there is no osu!.exe yet -- that is the expected
+    # state right after installing, not a fault, as long as the bootstrapper is in place.
     if [ -n "${OSU_LINUX:-}" ] && [ -f "$OSU_LINUX" ]; then
-        _check "osu!.exe" "ok" ""
+        _check "osu! client" "ok" ""
+    elif [ -f "${WINE_PREFIX:-}/osu!install.exe" ]; then
+        _check "osu! client (unpacks on first launch)" "ok" ""
     else
-        _check "osu!.exe" "fail" "Not found: ${OSU_LINUX:-unset}"
+        _check "osu! client" "fail" "Neither the client nor its bootstrapper is present: ${OSU_LINUX:-unset}"
     fi
 
     # Wrapper script

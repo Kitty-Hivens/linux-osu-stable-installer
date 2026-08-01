@@ -45,15 +45,6 @@ EOF
     eval "$RPC_SCRIPT"
 }
 
-# True while a game client is up. Wine sets the process name to osu!.exe and hands the
-# game a Windows path, so the prefix never shows up in the command line. Match the process
-# name first; the fallback keeps the backslash so an unrelated command line that merely
-# mentions osu!.exe cannot trigger it. Neither pattern matches osu!install.exe.
-osu_client_running() {
-    pgrep -x 'osu!\.exe' >/dev/null 2>&1 && return 0
-    pgrep -f 'osu!\\osu!\.exe' >/dev/null 2>&1
-}
-
 # Where osu! extracts itself. The Wine user directory is whatever name the prefix was
 # created with, so it is read back from the prefix rather than assumed to be $USER.
 osu_expected_exe() {
@@ -63,86 +54,46 @@ osu_expected_exe() {
     printf '%s' "$WINE_PREFIX/drive_c/users/$wine_user/AppData/Local/osu!/osu!.exe"
 }
 
-install_osu_client() {
-    log_info "Checking for existing osu! installation..."
+# Path of the self-extracting bootstrapper inside the prefix.
+OSU_BOOTSTRAP_EXE=""
 
-    local EXPECTED_PATH
-    EXPECTED_PATH=$(osu_expected_exe)
+# osu! ships as a bootstrapper that unpacks the client and downloads the game on its first
+# run. That run belongs to the first launch, which the wrapper handles, so installing never
+# has to open a window and wait for someone to close it. The bootstrapper is fetched here
+# but deliberately not executed: the launcher icon is read out of it, and having it on disk
+# means the first launch has one less thing that can fail.
+prepare_osu_client() {
+    log_info "Checking for an existing osu! installation..."
 
-    TARGET_OSU_EXE="$EXPECTED_PATH"
+    OSU_BOOTSTRAP_EXE="$WINE_PREFIX/osu!install.exe"
+    TARGET_OSU_EXE=$(osu_expected_exe)
 
     if [ ! -f "$TARGET_OSU_EXE" ]; then
-        TARGET_OSU_EXE=$(find "$WINE_PREFIX" -name "osu!.exe" 2>/dev/null | head -n 1)
+        # Prefixes from earlier versions may hold osu! somewhere else.
+        local FOUND
+        FOUND=$(find "$WINE_PREFIX" -name "osu!.exe" 2>/dev/null | head -n 1)
+        [ -n "$FOUND" ] && TARGET_OSU_EXE="$FOUND"
     fi
 
-    if [ -z "$TARGET_OSU_EXE" ] || [ ! -f "$TARGET_OSU_EXE" ]; then
-        log_info "Downloading osu! installer..."
-        if ! download "https://m1.ppy.sh/r/osu!install.exe" "$WINE_PREFIX/osu!install.exe"; then
-            notify_error "Failed to download osu!install.exe from m1.ppy.sh. Check your connection and try again."
-        fi
-
-        if [ "$SILENT_MODE" = false ] && command -v gum &> /dev/null; then
-            gum style --border rounded --padding "1 2" --border-foreground 214 \
-                "READ CAREFULLY" "" \
-                "osu! will now download its files. With Wine Mono the updater window may" \
-                "crash or vanish at 100% -- DO NOT PANIC, the script catches it and relaunches" \
-                "the game. Wait for the osu! main menu, then close it normally."
-            gum confirm "Understood, continue?" || notify_error "Aborted at osu! download step."
-        else
-            echo -e "\n[ACTION REQUIRED] osu! is downloading its files."
-            echo "Because of Wine Mono, the updater might crash and restart automatically."
-            echo "Please wait for it to reach the main menu, then close it completely."
-        fi
-
-        log_info "Launching osu! installer..."
-        env WINENTSYNC=0 WINEFSYNC=0 WINEESYNC=0 WINEWAYLAND=0 WAYLAND_DISPLAY="" \
-            WINEPREFIX="$WINE_PREFIX" LC_ALL=en_US.UTF-8 \
-            "$WINE_BIN" "$WINE_PREFIX/osu!install.exe" &
-        local INSTALLER_PID=$!
-
-        log_info "Waiting for osu!.exe to be extracted to AppData..."
-        local TIMEOUT=0
-        while [ ! -f "$EXPECTED_PATH" ]; do
-            sleep 2
-            TIMEOUT=$((TIMEOUT + 2))
-            if [ $TIMEOUT -ge 180 ]; then
-                log_warn "Extraction timeout. Checking for osu!.exe anyway..."
-                break
-            fi
-        done
-
-        wait $INSTALLER_PID 2>/dev/null || true  # Mono will assert/crash here — that's expected
-
-        if [ -f "$EXPECTED_PATH" ]; then
-            TARGET_OSU_EXE="$EXPECTED_PATH"
-            # osu!install.exe hands off to osu!.exe and exits, so the wine loader returns
-            # while the game is still coming up. Starting a second client here leaves two
-            # of them fighting over osu!.db and the user cfg.
-            if osu_client_running; then
-                log_info "osu! was started by its own installer -- waiting for you to close it."
-                while osu_client_running; do sleep 2; done
-            else
-                log_info "Extraction successful. Launching the game for first-time setup..."
-                env WINENTSYNC=0 WINEFSYNC=0 WINEESYNC=0 WINEWAYLAND=0 WAYLAND_DISPLAY="" \
-                    WINEPREFIX="$WINE_PREFIX" LC_ALL=en_US.UTF-8 \
-                    "$WINE_BIN" "$TARGET_OSU_EXE"
-            fi
-        else
-            notify_error "osu!.exe not found after installation. The updater may have completely failed."
-        fi
-
-        log_info "Shutting down Wine prefix safely..."
-        env WINEPREFIX="$WINE_PREFIX" "$WINE_BIN" boot --end-session &>/dev/null || true
-        env WINEPREFIX="$WINE_PREFIX" wineserver -k 2>/dev/null || true
-        sleep 2
-    else
+    if [ -f "$TARGET_OSU_EXE" ]; then
         log_info "Existing osu! installation found at: $TARGET_OSU_EXE"
+    else
+        log_info "osu! is not unpacked yet -- the first launch will do it, at: $TARGET_OSU_EXE"
     fi
 
-    if [ ! -f "$TARGET_OSU_EXE" ]; then
-        notify_error "osu!.exe not found. Installation failed or was aborted by user."
+    if [ ! -f "$OSU_BOOTSTRAP_EXE" ]; then
+        log_info "Fetching the osu! bootstrapper (not executed here)..."
+        download "https://m1.ppy.sh/r/osu!install.exe" "$OSU_BOOTSTRAP_EXE" \
+            || log_warn "Could not fetch osu!install.exe -- the first launch will retry the download."
     fi
-    log_info "osu! located at: $TARGET_OSU_EXE"
+
+    # osu! keeps directories that already exist, so creating them now is what lets the
+    # convenience symlinks point at something before the game has ever run.
+    local DATA_DIR dir
+    DATA_DIR=$(dirname "$TARGET_OSU_EXE")
+    for dir in Songs Skins Logs Chat; do
+        mkdir -p "$DATA_DIR/$dir"
+    done
 }
 
 ICON_BASE="$HOME/.local/share/icons/hicolor"
@@ -207,9 +158,10 @@ _extract_exe_icon() {
     return 1
 }
 
-# Install the launcher and file-type icons, skipping any already present. The launcher
-# icon is taken from osu!.exe when icoutils is available -- no network, and it always
-# matches the installed build -- with a download as fallback. Failures are non-fatal but
+# Install the launcher and file-type icons, skipping any already present. The launcher icon
+# is taken from osu!.exe when icoutils is available -- it always matches the installed build.
+# Before the first launch there is no osu!.exe yet, and the bootstrapper carries the same
+# icon set, so it serves as the source instead; a download is the last resort. Failures are non-fatal but
 # set ICON_INSTALL_FAILED so the installation summary can report them.
 install_icons() {
     local tmp pair name color
@@ -218,6 +170,7 @@ install_icons() {
     if _icon_present osu-stable-game; then
         log_info "  Application icon already installed."
     elif _extract_exe_icon "${TARGET_OSU_EXE:-}" "$tmp/osu-stable-game.png" \
+        || _extract_exe_icon "${OSU_BOOTSTRAP_EXE:-}" "$tmp/osu-stable-game.png" \
         || download_png "$tmp/osu-stable-game.png" \
             "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/Osu%21_Logo_2016.svg/500px-Osu%21_Logo_2016.svg.png" \
             "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/Osu%21_Logo_2016.svg/250px-Osu%21_Logo_2016.svg.png"
@@ -442,6 +395,50 @@ launch_osu() {
     ( $pre "$WINE_BIN" "$OSU_LINUX" >/dev/null 2>&1 & )
 }
 
+# osu! ships as a self-extracting bootstrapper, and running it is what unpacks the client
+# and pulls the game down. The installer deliberately leaves that to the first launch, so
+# everything below has to be prepared to find no osu!.exe at all yet.
+JUST_BOOTSTRAPPED=0
+ensure_osu_installed() {
+    [ -f "$OSU_LINUX" ] && return 0
+
+    local boot="$WINE_PREFIX/osu!install.exe"
+    if [ ! -f "$boot" ]; then
+        note "osu!" "Downloading the osu! installer..."
+        if command -v curl >/dev/null 2>&1; then
+            curl -L --fail -sS -o "$boot" "https://m1.ppy.sh/r/osu!install.exe" || rm -f "$boot"
+        elif command -v wget >/dev/null 2>&1; then
+            wget -q -O "$boot" "https://m1.ppy.sh/r/osu!install.exe" || rm -f "$boot"
+        fi
+        if [ ! -s "$boot" ]; then
+            rm -f "$boot"
+            note -u critical "osu!" "Could not download the osu! installer. Check your connection."
+            return 1
+        fi
+    fi
+
+    note "osu!" "First launch: osu! is unpacking and updating itself. The updater window may vanish at 100% -- it comes back on its own."
+
+    # Sync primitives are what makes the Wine Mono updater assert during this step, and the
+    # updater is happier on XWayland than on the native driver.
+    ( WINEPREFIX="$WINE_PREFIX" WINENTSYNC=0 WINEFSYNC=0 WINEESYNC=0 \
+      WINEWAYLAND=0 WAYLAND_DISPLAY="" LC_ALL=en_US.UTF-8 \
+      "$WINE_BIN" "$boot" >/dev/null 2>&1 & )
+
+    local waited=0
+    while [ ! -f "$OSU_LINUX" ]; do
+        sleep 2
+        waited=$((waited + 2))
+        if [ "$waited" -ge 300 ]; then
+            note -u critical "osu!" "osu! did not finish unpacking. Run ./install.sh --health-check to look into it."
+            return 1
+        fi
+    done
+
+    JUST_BOOTSTRAPPED=1
+    return 0
+}
+
 # Block until osu! is REALLY up: window mapped (UI live), then settle for the song db.
 wait_until_ready() {
     local i
@@ -456,6 +453,12 @@ wait_until_ready() {
     for ((i=0; i<90; i++)); do [ -n "$(osu_pid)" ] && break; sleep 1; done
     [ -n "$(osu_pid)" ] || return 1
     sleep $(( SETTLE > 12 ? SETTLE : 12 )); return 0
+}
+
+require_ready() {
+    wait_until_ready && return 0
+    note -u critical "osu! Importer" "osu! did not finish launching; nothing imported."
+    exit 1
 }
 
 import_file() {
@@ -496,6 +499,8 @@ do_rescan() {
 mkdir -p "$TEMP_LINUX"
 find "$TEMP_LINUX" -type f -mmin +60 -delete 2>/dev/null || true
 
+ensure_osu_installed || exit 1
+
 # Full rescan request.
 case "${1:-}" in
     --rescan|--refresh) do_rescan; exit $? ;;
@@ -507,13 +512,14 @@ if [ "$#" -eq 0 ]; then
     exit 0
 fi
 
-# Files present: guarantee a fully-ready osu! before importing into it.
+# Files present: guarantee a fully-ready osu! before importing into it. A client the
+# bootstrapper started for us is running but still updating, so it needs the same wait as
+# a cold start -- having a PID is not the same as being ready to accept a beatmap.
 if [ -z "$(osu_pid)" ]; then
     launch_osu
-    if ! wait_until_ready; then
-        note -u critical "osu! Importer" "osu! did not finish launching; nothing imported."
-        exit 1
-    fi
+    require_ready
+elif [ "$JUST_BOOTSTRAPPED" = 1 ]; then
+    require_ready
 fi
 
 # Split inputs: beatmaps (.osz) batch-import via Songs + one F5; skins/replays
