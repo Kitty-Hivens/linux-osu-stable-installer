@@ -28,6 +28,7 @@ Uses `gum` for a clean terminal (TUI) configuration dashboard. Fully unattended 
 - **OS:** Linux (Arch, Debian, Fedora, Void, or derivatives). Image-based systems are covered by container mode.
 - **Dependencies:** `curl`, `unzip`, `winetricks`, `icoutils`, `gum` — installed automatically on supported distros.
 - **Wine:** `wine-staging` recommended (and the default). Standard `wine` is supported.
+- **Network:** required. The client, MS .NET 4.8, the system packages, the fonts and the RPC bridge are all downloaded during setup, so there is no offline installation. The installer checks this up front instead of failing part-way through.
 
 > **NixOS users:** First-class via the bundled Nix flake — Nix supplies every dependency, no manual setup. See [NixOS](#nixos).
 

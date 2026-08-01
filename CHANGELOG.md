@@ -15,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`--distrobox-name` and `--distrobox-image`** to override the container name and image (`osu-stable`, `docker.io/library/archlinux:latest`). NVIDIA hosts get their drivers mounted in through distrobox's `--nvidia`.
 - **Offer instead of failure**: running the installer with no flags on an image-based system that has no Wine now proposes container mode rather than proceeding into an error.
 
+- **Network precheck before anything is set up**: every step of an installation downloads something -- system packages, MS .NET 4.8 through winetricks, the osu! client, fonts, the RPC bridge, the icons -- so a missing connection used to surface late and differently at each step, worst of all several minutes into the .NET install. A fresh installation now stops immediately with the reason; a prefix that already carries osu! is only warned, since re-applying settings offline is legitimate. Only the hosts the installer actually downloads from are probed, and `curl`'s absence on a bare system falls back to a plain TCP connect instead of reporting the machine as offline.
+
 ### Fixed
 - **`pkexec` inside a container**: there is no polkit agent to answer it, so package installation used the container's passwordless `sudo` instead.
 - **`-h`/`--help` is handled before any prompt**, so asking for the usage text cannot trigger the container question.

@@ -75,6 +75,22 @@ if [ "$DISTROBOX_MODE" = true ]; then
     container_validate_paths
 fi
 
+# Network precheck. Every remaining step fetches something -- system packages, MS .NET
+# 4.8 through winetricks, the osu! client itself, fonts, the RPC bridge, icons -- so there
+# is no offline path to a fresh installation. Saying so now beats failing eight minutes into
+# the .NET step. A prefix that already carries osu! is only warned about: re-applying
+# settings offline is legitimate, individual downloads just get skipped.
+if ! network_available; then
+    if [ -f "$(osu_expected_exe)" ]; then
+        notify_warning "No network connection.
+Continuing, but anything that downloads -- fonts, the Discord RPC bridge, icons -- will be skipped or fail."
+    else
+        notify_error "No network connection.
+osu! cannot be installed offline: the client, MS .NET 4.8 and the system packages are all downloaded during setup.
+Reconnect and run the installer again."
+    fi
+fi
+
 # 1a. Update mode short-circuits the full install
 if [ "$UPDATE_MODE" = true ]; then
     run_update

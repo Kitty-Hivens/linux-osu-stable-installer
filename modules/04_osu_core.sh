@@ -54,13 +54,20 @@ osu_client_running() {
     pgrep -f 'osu!\\osu!\.exe' >/dev/null 2>&1
 }
 
+# Where osu! extracts itself. The Wine user directory is whatever name the prefix was
+# created with, so it is read back from the prefix rather than assumed to be $USER.
+osu_expected_exe() {
+    local wine_user
+    wine_user=$(ls -1 "$WINE_PREFIX/drive_c/users/" 2>/dev/null | grep -v "Public" | head -n 1)
+    [ -z "$wine_user" ] && wine_user="$USER"
+    printf '%s' "$WINE_PREFIX/drive_c/users/$wine_user/AppData/Local/osu!/osu!.exe"
+}
+
 install_osu_client() {
     log_info "Checking for existing osu! installation..."
 
-    local WINE_USER
-    WINE_USER=$(ls -1 "$WINE_PREFIX/drive_c/users/" 2>/dev/null | grep -v "Public" | head -n 1)
-    [ -z "$WINE_USER" ] && WINE_USER="$USER"
-    local EXPECTED_PATH="$WINE_PREFIX/drive_c/users/$WINE_USER/AppData/Local/osu!/osu!.exe"
+    local EXPECTED_PATH
+    EXPECTED_PATH=$(osu_expected_exe)
 
     TARGET_OSU_EXE="$EXPECTED_PATH"
 

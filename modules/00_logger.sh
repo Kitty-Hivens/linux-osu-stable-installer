@@ -64,6 +64,26 @@ resolve_wine_bin() {
     esac
 }
 
+# True when the hosts the installation actually pulls from are reachable. Only those hosts
+# are contacted -- nothing is sent anywhere the install would not have contacted anyway.
+# Any HTTP answer counts: the point is reachability, not a specific status code.
+network_available() {
+    local host
+    if command -v curl &> /dev/null; then
+        for host in https://m1.ppy.sh https://github.com; do
+            curl -s --max-time 8 -o /dev/null "$host" && return 0
+        done
+        return 1
+    fi
+
+    # curl is itself one of the packages the dependency step installs, so on a bare system
+    # fall back to a plain TCP connect rather than reporting the machine as offline.
+    for host in m1.ppy.sh github.com; do
+        (exec 3<>"/dev/tcp/$host/443") 2>/dev/null && return 0
+    done
+    return 1
+}
+
 # Download $1 to $2 with --fail. Returns 0 on success and non-empty file.
 # On failure: removes any partial file and logs an error. Caller decides whether to abort.
 download() {
