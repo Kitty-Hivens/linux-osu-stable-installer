@@ -41,6 +41,12 @@ Installation Options:
       --no-gamemode      Disable Feral GameMode integration
       --links-dir DIR    Symlink directory for Songs/Skins/Logs/Chat (default: ~/osu)
 
+Container mode (immutable hosts such as Bazzite, Silverblue, SteamOS):
+      --distrobox        Install Wine into a distrobox container instead of the system.
+                         Needs distrobox and podman, both preinstalled on those systems.
+      --distrobox-name N Container name (default: osu-stable)
+      --distrobox-image I Container image (default: docker.io/library/archlinux:latest)
+
 Maintenance:
       --update           Re-apply settings over existing installation
       --uninstall        Remove osu! and all integration files
@@ -97,6 +103,9 @@ parse_cli() {
                 USER_SET_AUDIO=true
                 shift ;;
             --links-dir) LINKS_DIR="$2"; USER_SET_LINKS=true; shift ;;
+            --distrobox)        DISTROBOX_MODE=true ;;
+            --distrobox-name)   DISTROBOX_NAME="$2";  shift ;;
+            --distrobox-image)  DISTROBOX_IMAGE="$2"; shift ;;
             --no-sync)      ENABLE_FSYNC="FALSE";     USER_SET_FSYNC=true ;;
             --no-gamemode)  ENABLE_GAMEMODE="FALSE";  USER_SET_GAMEMODE=true ;;
             --update)       UPDATE_MODE=true ;;
@@ -122,7 +131,7 @@ run_tui() {
     _abort() { log_info "Installation cancelled."; exit 0; }
 
     gum style --border rounded --padding "1 3" --margin "1 0" --border-foreground 212 \
-        "osu! Configuration Dashboard  v5.0.3" "" "Pick options, Enter confirms each." || true
+        "osu! Configuration Dashboard  v5.1.0" "" "Pick options, Enter confirms each." || true
 
     WINE_PREFIX=$(gum input --width 72 --prompt "Install location > " --value "$WINE_PREFIX") || _abort
     [ -n "$WINE_PREFIX" ] || WINE_PREFIX="$DEFAULT_PREFIX"

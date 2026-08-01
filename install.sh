@@ -1,7 +1,7 @@
 #!/bin/bash
 # ==============================================================================
 # osu! Linux Installer (Stable)
-# Version: v5.0.3
+# Version: v5.1.0
 # Author:  Kitty-Hivens
 # ==============================================================================
 
@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 MODULES_DIR="$SCRIPT_DIR/modules"
 
 # Validate all modules are present before sourcing
-REQUIRED_MODULES=(00_logger 01_cli_gui 02_deps 03_wine_env 04_osu_core 05_maintenance)
+REQUIRED_MODULES=(00_logger 01_cli_gui 02_deps 03_wine_env 04_osu_core 05_maintenance 06_container)
 for module in "${REQUIRED_MODULES[@]}"; do
     if [ ! -f "$MODULES_DIR/${module}.sh" ]; then
         echo "Error: Missing module: ${module}.sh (expected at $MODULES_DIR/${module}.sh)"
@@ -20,7 +20,7 @@ for module in "${REQUIRED_MODULES[@]}"; do
     source "$MODULES_DIR/${module}.sh"
 done
 
-log_info "Starting osu! Linux Installer v5.0.3"
+log_info "Starting osu! Linux Installer v5.1.0"
 
 # --- Pre-scan for --silent so maintenance commands honor it ---
 for arg in "$@"; do
@@ -36,6 +36,7 @@ ARGS=("$@")
 i=0
 while [ $i -lt ${#ARGS[@]} ]; do
     case "${ARGS[$i]}" in
+        -h|--help)       show_help ;;  # before any container prompt can get in the way
         --uninstall)     run_uninstall;    exit 0 ;;
         --health-check)  run_health_check; exit $? ;;
         --export-config) export_config;    exit 0 ;;
@@ -51,8 +52,28 @@ done
 
 # --- Standard Installation Flow ---
 
+# 0. Container mode. On ostree-based hosts (Bazzite, Silverblue, SteamOS) Wine cannot be
+# installed into the running system without root and a reboot, so the whole installation
+# runs inside a distrobox container instead. $HOME is shared, so everything the installer
+# writes still lands on the host. A previous container install is remembered in the config,
+# which is what lets a later plain --update find its way back inside.
+container_prescan "$@"
+if [ "$DISTROBOX_MODE" = false ] && ! container_active; then
+    container_offer_fallback
+fi
+if [ "$DISTROBOX_MODE" = true ] && ! container_active; then
+    if run_in_distrobox "$SCRIPT_DIR/install.sh" "$@"; then RC=0; else RC=$?; fi
+    # KDE keeps its .desktop entries in ksycoca, which only the host can rebuild.
+    refresh_desktop_caches
+    exit $RC
+fi
+
 # 1. Parse CLI args or launch GUI
 init_config "$@"
+
+if [ "$DISTROBOX_MODE" = true ]; then
+    container_validate_paths
+fi
 
 # 1a. Update mode short-circuits the full install
 if [ "$UPDATE_MODE" = true ]; then

@@ -1,6 +1,6 @@
 # osu! Linux Installer (Stable)
 
-**Version:** v5.0.3
+**Version:** v5.1.0
 **License:** MIT
 **Languages:** [English](README.md) | [Русский](README_RU.md)
 
@@ -11,6 +11,7 @@ Uses `gum` for a clean terminal (TUI) configuration dashboard. Fully unattended 
 ## Key Features
 
 - **Multi-distribution:** Arch Linux, Debian/Ubuntu, Fedora, Void Linux, and NixOS (first-class via the bundled Nix flake).
+- **Immutable systems:** Bazzite, Silverblue, Kinoite and SteamOS via `--distrobox` — Wine goes into a container, no root and no reboot. See [Immutable systems](#immutable-systems-bazzite-silverblue-kinoite-steamos).
 - **Graphics:** OpenGL or DXVK (DirectX → Vulkan translation for reduced input latency).
 - **Window system:** Native Wayland (default, no XWayland overhead) or X11 (fallback). The driver is selected via the Wine registry — `WINEWAYLAND=1` alone does nothing.
 - **Fonts:** CJK font installation (Noto Sans CJK, WenQuanYi, Koruri, or system linking) plus a symbol-glyph fallback so decorative dingbats in beatmap titles render instead of boxes.
@@ -24,7 +25,7 @@ Uses `gum` for a clean terminal (TUI) configuration dashboard. Fully unattended 
 
 ## System Requirements
 
-- **OS:** Linux (Arch, Debian, Fedora, Void, or derivatives).
+- **OS:** Linux (Arch, Debian, Fedora, Void, or derivatives). Image-based systems are covered by container mode.
 - **Dependencies:** `curl`, `unzip`, `winetricks`, `icoutils`, `gum` — installed automatically on supported distros.
 - **Wine:** `wine-staging` recommended (and the default). Standard `wine` is supported.
 
@@ -39,7 +40,30 @@ chmod +x install.sh
 ./install.sh
 ```
 
-> **Security note:** Root privileges (via `pkexec`) are requested **only** to install missing system packages. osu! itself is installed entirely in the user's home directory.
+> **Security note:** Root privileges (via `pkexec`) are requested **only** to install missing system packages. osu! itself is installed entirely in the user's home directory. On immutable systems even that request goes away — see below.
+
+### Immutable systems (Bazzite, Silverblue, Kinoite, SteamOS)
+
+These distributions are built from an image: packages are layered into the *next* boot, which takes root and a reboot, so Wine cannot be installed into the running system at all. Pass `--distrobox` and the dependencies go into a container instead:
+
+```bash
+./install.sh --distrobox
+```
+
+The installer creates a distrobox container, installs Wine staging, `winetricks`, the 32-bit graphics/audio libraries and the fonts inside it, then re-runs itself in there. `$HOME` is shared with the container, so the prefix, the config, the desktop entry, the MIME handlers and the `~/osu` symlinks all land on the host exactly as in a normal install.
+
+The desktop entry points at shims in `~/.config/osu-importer/hostbin/`, which reach into the container. Launching osu! from the application menu and double-clicking a `.osz` therefore work from the host as usual.
+
+| Option | Default |
+| :--- | :--- |
+| `--distrobox-name` | `osu-stable` |
+| `--distrobox-image` | `docker.io/library/archlinux:latest` |
+
+On Bazzite, `--distrobox-image ghcr.io/ublue-os/bazzite-arch` is a heavier but gaming-tuned alternative.
+
+Requires `distrobox` and `podman`, both preinstalled on Bazzite, Silverblue and Kinoite. `distrobox` alone can be dropped into `~/.local` without root, but `podman` cannot — on a system that ships neither, an administrator is still needed once.
+
+`--update`, `--health-check`, `--uninstall` and `--launch` find the container on their own afterwards — the flag is only needed for the first install. If Wine is missing on an image-based system and the installer is run without any flag, it offers this mode instead of failing.
 
 ### NixOS
 
@@ -90,6 +114,11 @@ Installation:
       --no-gamemode      Disable GameMode integration
       --links-dir DIR    Symlink directory (default: ~/osu)
   -s, --silent           Unattended mode, no TUI
+
+Container mode (immutable hosts):
+      --distrobox        Install Wine into a distrobox container
+      --distrobox-name N Container name (default: osu-stable)
+      --distrobox-image I Container image (default: archlinux:latest)
 
 Maintenance:
       --update           Re-apply settings to existing installation
@@ -173,6 +202,8 @@ rm -f ~/.local/share/mime/packages/osu-file-types.xml
 rm -rf ~/.config/osu-importer
 # Remove symlinks:
 rm -f ~/osu/Songs ~/osu/Skins ~/osu/Logs ~/osu/Chat
+# Container mode only:
+distrobox rm --force osu-stable
 ```
 
 ## Known Issues
@@ -180,6 +211,7 @@ rm -f ~/osu/Songs ~/osu/Skins ~/osu/Logs ~/osu/Chat
 - **Wayland raw input:** the native Wayland driver does not expose true raw input — turn osu!'s Raw Input **off** and set sensitivity via mouse DPI, and run **Borderless** rather than exclusive fullscreen (which flickers on focus changes). If you need hardware-raw input, use the X11 driver instead.
 - **Wine Mono + FSync:** Enabling any sync primitive (FSync/ESync/NTSync) with Wine Mono causes a crash at startup (`mono-error.c:647`). Use MS .NET 4.8 or disable sync.
 - **NixOS:** Run through the bundled flake (`nix run` / `nix develop`) so Nix provides the dependencies — see [NixOS](#nixos).
+- **Container mode:** the Wine prefix and the symlink directory have to stay under `$HOME`, which is what the container shares with the host. The first launch after a reboot costs a few extra seconds while the container starts. GameMode keeps running on the host, so its CPU-governor switch applies, but its process-priority tweaks may not reach Wine inside the container.
 
 ## License
 

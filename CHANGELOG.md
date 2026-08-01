@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [v5.1.0] -- 2026-08-01
+
+### Added
+- **Container mode for image-based systems (`--distrobox`)**: on Bazzite, Silverblue, Kinoite and SteamOS, packages are layered into the next boot image, so Wine cannot be installed into the running system without root and a reboot -- previously the dependency step warned and the install then died on the first Wine call. The installer now creates a distrobox container, installs Wine staging, `winetricks`, the 32-bit graphics and audio libraries and the fonts inside it, and re-runs itself in there. `$HOME` is shared, so the prefix, config, desktop entries, MIME handlers and symlinks still land on the host.
+- **Host shims for container installations**: the desktop entry, the file associations and the importer wrapper run on the host, which has no Wine of its own. `~/.config/osu-importer/hostbin/{wine,winepath,wineserver}` bridge into the container, and the generated config points at them, so launching osu! and double-clicking a `.osz` work unchanged. Arguments are handed over through a generated one-shot script, since `distrobox-enter` re-parses its trailing command through a shell and every osu! path contains spaces.
+- **The container is remembered**: `--update`, `--health-check`, `--uninstall` and `--launch` find it from the stored configuration, so the flag is only needed for the first install. `--health-check` reports the container itself and looks for `winetricks` inside it; `--uninstall` offers to remove it.
+- **`--distrobox-name` and `--distrobox-image`** to override the container name and image (`osu-stable`, `docker.io/library/archlinux:latest`). NVIDIA hosts get their drivers mounted in through distrobox's `--nvidia`.
+- **Offer instead of failure**: running the installer with no flags on an image-based system that has no Wine now proposes container mode rather than proceeding into an error.
+
+### Fixed
+- **`pkexec` inside a container**: there is no polkit agent to answer it, so package installation used the container's passwordless `sudo` instead.
+- **`-h`/`--help` is handled before any prompt**, so asking for the usage text cannot trigger the container question.
+
+---
+
 ## [v5.0.3] -- 2026-07-28
 
 ### Fixed

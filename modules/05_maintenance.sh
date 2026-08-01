@@ -108,6 +108,25 @@ run_uninstall() {
         log_info "  Removed empty symlink directory: $LINKS_TARGET"
     fi
 
+    # The container is asked about separately: it may be shared with other software the
+    # user put in it, and pulling the image again is expensive.
+    local BOX="${INSTALLER_DISTROBOX_NAME:-}"
+    if [ -n "$BOX" ] && container_exists "$BOX"; then
+        local REMOVE_BOX=false
+        if [ "$SILENT_MODE" = false ] && command -v gum &> /dev/null; then
+            gum confirm --default=false "Also remove the distrobox container '$BOX'?" && REMOVE_BOX=true
+        elif [ "$SILENT_MODE" = false ]; then
+            read -rp "Also remove the distrobox container '$BOX'? [y/N] " ANSWER
+            [[ "${ANSWER,,}" =~ ^y ]] && REMOVE_BOX=true
+        fi
+
+        if [ "$REMOVE_BOX" = true ]; then
+            remove_distrobox_container "$BOX"
+        else
+            log_info "Keeping the container '$BOX'. Remove it later with: distrobox rm --force $BOX"
+        fi
+    fi
+
     log_info "Removing installer log..."
     rm -f "$HOME/.osu_installer.log"
 
@@ -228,11 +247,29 @@ run_health_check() {
         _check "Convenience symlinks ($LINKS_TARGET)" "fail" "One or more symlinks missing. Run --update to recreate."
     fi
 
-    # winetricks
-    if command -v winetricks &> /dev/null; then
+    # Container, when this installation lives in one. Everything below the shims depends
+    # on it, so a missing container explains every other Wine-side failure at once.
+    local BOX="${INSTALLER_DISTROBOX_NAME:-}"
+    if [ -n "$BOX" ]; then
+        DISTROBOX_NAME="$BOX"
+        if container_exists "$BOX"; then
+            _check "Distrobox container ($BOX)" "ok" ""
+        else
+            _check "Distrobox container ($BOX)" "fail" "Container is gone. Re-run the installer with --distrobox to rebuild it."
+        fi
+    fi
+
+    # winetricks -- in container mode it is installed inside the container, not on the host.
+    local TRICKS_OK=false
+    if [ -n "$BOX" ]; then
+        container_exists "$BOX" && _container_exec bash -c 'command -v winetricks' &> /dev/null && TRICKS_OK=true
+    elif command -v winetricks &> /dev/null; then
+        TRICKS_OK=true
+    fi
+    if [ "$TRICKS_OK" = true ]; then
         _check "winetricks" "ok" ""
     else
-        _check "winetricks" "fail" "Not found in PATH"
+        _check "winetricks" "fail" "Not found${BOX:+ inside the container}"
     fi
 
     # Summary
