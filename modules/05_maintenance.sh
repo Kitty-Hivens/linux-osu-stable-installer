@@ -75,9 +75,13 @@ run_uninstall() {
         fi
     fi
 
+    # Match the process name, not any command line that happens to mention osu!.exe -- a
+    # terminal or an editor with that path in its arguments must not be killed along with
+    # the game. The fallback keeps the backslash of the Windows path Wine passes.
     log_info "Killing running osu! processes..."
-    pkill -f "osu!.exe"    2>/dev/null || true
-    pkill -f "osu!install" 2>/dev/null || true
+    pkill -x 'osu!\.exe'          2>/dev/null || true
+    pkill -f 'osu!\\osu!\.exe'    2>/dev/null || true
+    pkill -x 'osu!install\.exe'   2>/dev/null || true
 
     log_info "Removing Wine prefix: $PREFIX"
     rm -rf "$PREFIX"

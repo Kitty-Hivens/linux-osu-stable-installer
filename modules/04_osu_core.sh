@@ -402,7 +402,17 @@ note() {                                                                  # alwa
 }
 dbg()  { wlog "$*"; [ "${DEBUG:-0}" = 1 ] && notify-send "$@" 2>/dev/null || true; }  # notified only when DEBUG=1
 
-osu_pid()       { pgrep -f 'osu!\.exe' | head -n1; }
+# Wine sets the process name to osu!.exe, so that is what identifies a real client. The
+# loose command-line form matches anything that merely mentions the executable -- a terminal
+# it was typed in, an editor, a script -- and a false hit makes the launcher below decide the
+# game is already running and silently do nothing. The fallback keeps the backslash of the
+# Windows path Wine actually passes, which no Linux path can contain.
+osu_pid() {
+    local p
+    p=$(pgrep -x 'osu!\.exe' 2>/dev/null | head -n1)
+    [ -n "$p" ] || p=$(pgrep -f 'osu!\\osu!\.exe' 2>/dev/null | head -n1)
+    printf '%s' "$p"
+}
 osu_window_up() { hyprctl clients -j 2>/dev/null | grep -Eq '"class": *"osu!\.exe"'; }
 
 ensure_wayland_env() {
