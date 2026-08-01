@@ -182,7 +182,7 @@ install_icons() {
     if _icon_present osu-stable-game; then
         log_info "  Application icon already installed."
     elif _extract_exe_icon "${TARGET_OSU_EXE:-}" "$tmp/osu-stable-game.png" \
-        || _extract_exe_icon "${OSU_BOOTSTRAP_EXE:-}" "$tmp/osu-stable-game.png" \
+        || _extract_exe_icon "${OSU_BOOTSTRAP_EXE:-$WINE_PREFIX/osu!install.exe}" "$tmp/osu-stable-game.png" \
         || download_png "$tmp/osu-stable-game.png" \
             "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/Osu%21_Logo_2016.svg/500px-Osu%21_Logo_2016.svg.png" \
             "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/Osu%21_Logo_2016.svg/250px-Osu%21_Logo_2016.svg.png"
@@ -448,8 +448,11 @@ ensure_osu_installed() {
 
     # Selecting several beatmaps at once starts one wrapper per file, and the launcher can
     # be clicked twice. Two bootstrappers unpacking into the same prefix would corrupt it.
-    if command -v flock > /dev/null 2>&1; then
-        exec 9> "$WINE_PREFIX/.osu-bootstrap.lock" || true
+    # Opening the lock is attempted first: taking flock on a descriptor that never opened
+    # would fail and be reported as a busy install, hiding the real reason.
+    local lock="$WINE_PREFIX/.osu-bootstrap.lock"
+    if command -v flock > /dev/null 2>&1 && : > "$lock" 2>/dev/null; then
+        exec 9> "$lock"
         if ! flock -w 900 9; then
             note -u critical "osu!" "Another launch is still installing osu!. Try again once it finishes."
             return 1
