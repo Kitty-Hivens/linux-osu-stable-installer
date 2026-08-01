@@ -480,7 +480,8 @@ ensure_osu_installed() {
     # it is the only diagnostic there is when the unpack does not finish.
     ( WINEPREFIX="$WINE_PREFIX" WINENTSYNC=0 WINEFSYNC=0 WINEESYNC=0 \
       WINEWAYLAND=0 WAYLAND_DISPLAY="" LC_ALL=en_US.UTF-8 \
-      "$WINE_BIN" "$boot" >> "$WRAPPER_LOG" 2>&1 & )
+      "$WINE_BIN" "$boot" >> "$WRAPPER_LOG" 2>&1 ) &
+    local boot_pid=$!
 
     local waited=0
     while [ ! -f "$OSU_LINUX" ]; do
@@ -492,8 +493,19 @@ ensure_osu_installed() {
             return 1
         fi
     done
-
     wlog "osu! unpacked to $OSU_LINUX after ${waited}s"
+
+    # osu!.exe exists a moment before the bootstrapper hands over to it and exits. Returning
+    # in that gap would leave the launcher below convinced nothing is running, and a second
+    # client started on top of the first makes the two fight over osu!.db and the user config.
+    local settle=0
+    while [ "$settle" -lt 30 ]; do
+        [ -n "$(osu_pid)" ] && { wlog "the bootstrapper started the client itself"; break; }
+        kill -0 "$boot_pid" 2>/dev/null || { sleep 3; break; }
+        sleep 1
+        settle=$((settle + 1))
+    done
+
     JUST_BOOTSTRAPPED=1
     return 0
 }
