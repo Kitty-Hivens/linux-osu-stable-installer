@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [v5.1.1] -- 2026-08-13
+
+### Fixed
+- **Batch beatmap import did not reach osu! on a Lua Hyprland config**: importing several `.osz` at once drops the extras into `Songs/` and sends one F5 to sweep them in, focusing the client first so the keystroke lands there. That focus used `hyprctl dispatch focuswindow`, and Hyprland parses the dispatch argument as Lua once the config is Lua, where the classic form is a syntax error -- `hyprctl` reports it and still exits 0, so the failure was silent. The keystroke then went to whatever window was focused, usually the file manager the files were opened from, and every map after the first stayed invisible until the next restart. The Lua form is now used when the classic one is refused. Only affects setups where the client does not raise itself on activation; with `misc:focus_on_activate` enabled osu! was already in front and the F5 landed correctly.
+
+---
+
 ## [v5.1.0] -- 2026-08-01
 
 ### Added
