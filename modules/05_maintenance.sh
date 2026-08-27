@@ -22,6 +22,10 @@ Run a fresh install first."
 
     log_info "Update Mode: re-applying settings to existing installation."
 
+    # An update is the one moment a Wine that turned broken under the user can be swapped
+    # out: the system Wine may well have moved on since the install.
+    wine_version_guard
+
     # Backfill index-opt-out markers on prefixes created before this was added.
     write_index_markers
 
@@ -192,7 +196,11 @@ run_health_check() {
     elif [ -n "$WINE_BIN" ] && command -v "$WINE_BIN" &> /dev/null; then
         local WINE_VER
         WINE_VER=$("$WINE_BIN" --version 2>/dev/null || echo "unknown")
-        _check "Wine binary ($WINE_VER)" "ok" ""
+        if wine_version_is_broken "$(wine_version_number "$WINE_VER")"; then
+            _check "Wine binary ($WINE_VER)" "fail" "This release cannot read osu!.db -- run --update to pin a working Wine"
+        else
+            _check "Wine binary ($WINE_VER)" "ok" ""
+        fi
     else
         _check "Wine binary" "fail" "Not found: ${WINE_BIN:-unset}"
     fi
@@ -439,6 +447,11 @@ launch_osu() {
 
     echo "[INFO] Launching osu! (debug mode)"
     echo "[INFO]   Wine:   $WINE_BIN ($WINE_VER)"
+    if wine_version_is_broken "$(wine_version_number "$WINE_VER")"; then
+        echo "[WARNING] This Wine release cannot read osu!.db."
+        echo "[WARNING] osu!.db will be renamed to osu!.db.<number>.bak and rebuilt empty."
+        echo "[WARNING] Re-run ./install.sh --update to pin a working Wine."
+    fi
     echo "[INFO]   Prefix: $WINE_PREFIX"
     echo "[INFO]   Exe:    $OSU_LINUX"
     echo "[INFO] Wine output below — Ctrl+C to kill"

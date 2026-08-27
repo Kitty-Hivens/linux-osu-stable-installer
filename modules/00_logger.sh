@@ -143,3 +143,47 @@ download_png() {
     done
     return 1
 }
+
+# ==============================================================================
+# Wine version guard
+# ==============================================================================
+# Wine releases that break osu!: the client throws OutOfMemoryException while reading
+# osu!.db, renames the real database to osu!.db.<ticks>.bak and rebuilds an empty one --
+# on every launch, so the song list comes up empty and stays that way until the backup is
+# put back by hand. Verified by running 11.15 and 11.16 against the same prefix and the
+# same 32 MB database: 11.15 reads it, 11.16 fails within ten seconds. Neither the file
+# nor its size is at fault -- 11.16 rejects a 1 MB database it wrote itself moments earlier.
+WINE_BROKEN_VERSIONS="11.16"
+
+# Echo the bare version out of whatever reports one: "wine-11.16 (Staging)", "wine-11.16",
+# "11.16-1.1" all yield "11.16". Empty when the string carries no version at all.
+wine_version_number() {
+    printf '%s' "$1" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1
+}
+
+# True when bare version $1 is on the broken list.
+wine_version_is_broken() {
+    local v="$1" bad
+    [ -n "$v" ] || return 1
+    for bad in $WINE_BROKEN_VERSIONS; do
+        [ "$v" = "$bad" ] && return 0
+    done
+    return 1
+}
+
+# Bare version of the Wine binary $1. Empty when it cannot be run at all.
+wine_binary_version() {
+    local out
+    out=$("$1" --version 2>/dev/null) || return 1
+    wine_version_number "$out"
+}
+
+# What the breakage looks like, for every message that has to explain it. Kept in one
+# place so the installer, the launcher and the health check tell the same story.
+wine_broken_blurb() {
+    printf '%s' "osu! cannot read its beatmap database on this Wine version.
+
+Every launch renames osu!.db to osu!.db.<number>.bak and builds an empty one in its place,
+so the song list comes up empty. Nothing is deleted -- the real database is in those .bak
+files -- but it has to be restored by hand after every start."
+}

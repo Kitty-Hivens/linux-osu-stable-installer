@@ -1,7 +1,7 @@
 #!/bin/bash
 # ==============================================================================
 # osu! Linux Installer (Stable)
-# Version: v5.1.1
+# Version: v5.2.0
 # Author:  Kitty-Hivens
 # ==============================================================================
 
@@ -20,7 +20,7 @@ for module in "${REQUIRED_MODULES[@]}"; do
     source "$MODULES_DIR/${module}.sh"
 done
 
-log_info "Starting osu! Linux Installer v5.1.1"
+log_info "Starting osu! Linux Installer v5.2.0"
 
 # --- Pre-scan for --silent so maintenance commands honor it ---
 for arg in "$@"; do
@@ -115,6 +115,12 @@ if [ "$UPDATE_MODE" = true ]; then
     run_update
     exit 0
 fi
+
+# 1b. Wine version guard. Runs before the dependency step on purpose: the package manager
+# can be asked which Wine version it would install without installing it, so a release known
+# to destroy the beatmap database is caught while swapping it out still costs nothing. When
+# Wine is already present its own --version is checked instead.
+wine_version_guard
 
 # 2. Check and install missing system dependencies
 check_and_install_dependencies

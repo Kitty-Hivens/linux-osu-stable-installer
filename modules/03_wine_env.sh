@@ -13,6 +13,216 @@ write_index_markers() {
     done
 }
 
+# ==============================================================================
+# Wine version guard: keep a known-broken Wine away from the beatmap database
+# ==============================================================================
+
+# Version the package manager would install for package $1, asked before anything is
+# installed so a broken release can be refused instead of diagnosed afterwards.
+# Empty when the package manager is unknown or carries no such package.
+_pm_candidate_version() {
+    local pkg="$1" out=""
+    if command -v pacman &> /dev/null; then
+        out=$(pacman -Si "$pkg" 2>/dev/null | awk -F': *' '/^Version/{print $2; exit}')
+    elif command -v apt-cache &> /dev/null; then
+        out=$(apt-cache policy "$pkg" 2>/dev/null | awk -F': *' '/Candidate:/{print $2; exit}')
+    elif command -v dnf &> /dev/null; then
+        out=$(dnf -q info "$pkg" 2>/dev/null | awk -F': *' '/^Version/{print $2; exit}')
+    elif command -v xbps-query &> /dev/null; then
+        out=$(xbps-query -R -p pkgver "$pkg" 2>/dev/null)
+    fi
+    wine_version_number "$out"
+}
+
+# Newest cached package of $1 whose version is not on the broken list; echoes its path.
+# Only pacman's cache is searched. Its layout and file naming are stable enough to read a
+# version straight off the filename, which is what makes an offline downgrade possible at
+# all; elsewhere the guard falls back to telling the user what to do by hand.
+_cached_good_wine_pkg() {
+    local pkg="$1" f ver best="" best_ver=""
+    command -v pacman &> /dev/null || return 1
+    for f in /var/cache/pacman/pkg/"$pkg"-[0-9]*.pkg.tar.*; do
+        case "$f" in *.sig) continue ;; esac
+        [ -f "$f" ] || continue
+        ver=$(wine_version_number "$(basename "$f")")
+        [ -n "$ver" ] || continue
+        wine_version_is_broken "$ver" && continue
+        if [ -z "$best_ver" ] || [ "$(printf '%s\n%s\n' "$best_ver" "$ver" | sort -V | tail -n1)" = "$ver" ]; then
+            best_ver="$ver"
+            best="$f"
+        fi
+    done
+    [ -n "$best" ] || return 1
+    printf '%s' "$best"
+}
+
+# Unpack package file $1 (version $2) into ~/.local/opt/wine-$2 and echo the wine binary
+# inside it. A Wine tree is relocatable -- the loader finds its own lib directory relative
+# to the binary -- so this needs no root and leaves the system package untouched.
+_pin_wine_from_pkg() {
+    local pkg_file="$1" ver="$2" dest="$HOME/.local/opt/wine-$2"
+    command -v bsdtar &> /dev/null || return 1
+    rm -rf "$dest"
+    mkdir -p "$dest" || return 1
+    if ! bsdtar -xf "$pkg_file" -C "$dest" 2>/dev/null; then
+        rm -rf "$dest"
+        return 1
+    fi
+    rm -f "$dest/.PKGINFO" "$dest/.MTREE" "$dest/.INSTALL" "$dest/.BUILDINFO"
+    [ -x "$dest/usr/bin/wine" ] || { rm -rf "$dest"; return 1; }
+    printf '%s' "$dest/usr/bin/wine"
+}
+
+# Which package name to look for in the cache. WINE_SELECTION is the package label the
+# user picked ("wine" / "wine-staging"); an absolute path was pinned already and is left
+# alone. Arch ships no `wine-staging` binary, so the label is the only thing that says
+# which package the installed `wine` actually came from.
+_wine_package_name() {
+    case "$WINE_SELECTION" in
+        /*) printf '%s' "" ;;
+        *)  printf '%s' "$WINE_SELECTION" ;;
+    esac
+}
+
+# Offer the system-wide downgrade. Kept separate because it is the invasive branch: it
+# needs root, it changes Wine for everything else on the machine, and the very next
+# `pacman -Syu` puts the broken version straight back unless it is held.
+_offer_system_downgrade() {
+    local pkg_file="$1" ver="$2" pkg="$3"
+    local ELEVATE="pkexec"
+    container_active && ELEVATE="sudo"
+
+    log_info "Downgrading the system package to $ver ..."
+    if ! $ELEVATE pacman -U "$pkg_file" --noconfirm; then
+        notify_warning "The downgrade did not go through. Nothing was changed.
+Run it by hand if you want to retry:
+    sudo pacman -U $pkg_file"
+        return 1
+    fi
+
+    # pacman.conf belongs to the user, not to this installer -- silently editing what the
+    # system upgrades is exactly the kind of surprise a game installer has no business
+    # springing. The line is printed instead, so holding the package stays a deliberate act.
+    notify_user "Wine downgraded to $ver.
+
+The next 'pacman -Syu' will pull the broken version back in. To hold it, add this to the
+[options] section of /etc/pacman.conf yourself:
+
+    IgnorePkg = $pkg
+
+Remove that line once a fixed Wine is released."
+    return 0
+}
+
+# The guard proper. Determines which Wine version is about to be used -- the installed
+# binary, or the one the package manager is about to fetch -- and refuses to walk into a
+# release known to destroy the beatmap database without saying so first.
+#
+# On acceptance the replacement goes into WINE_SELECTION rather than WINE_BIN: an absolute
+# path travels through resolve_wine_bin verbatim and is stored as INSTALLER_WINE_SELECTION,
+# so the pin survives a later --update, which regenerates osu-env.conf from scratch.
+wine_version_guard() {
+    local ver pkg pkg_file good_ver pinned choice
+
+    pkg=$(_wine_package_name)
+    if [ -z "$pkg" ]; then
+        # An explicit path is the user's own choice; still say so if it is a broken build.
+        ver=$(wine_binary_version "$WINE_BIN")
+        wine_version_is_broken "$ver" || return 0
+        notify_warning "The Wine you pointed the installer at is $ver.
+
+$(wine_broken_blurb)"
+        return 0
+    fi
+
+    ver=$(wine_binary_version "$WINE_BIN")
+    [ -n "$ver" ] || ver=$(_pm_candidate_version "$pkg")
+    wine_version_is_broken "$ver" || return 0
+
+    log_warn "Wine $ver is on the known-broken list."
+
+    pkg_file=$(_cached_good_wine_pkg "$pkg" || true)
+    [ -n "$pkg_file" ] && good_ver=$(wine_version_number "$(basename "$pkg_file")")
+
+    local HEAD="Wine $ver breaks osu!.
+
+$(wine_broken_blurb)"
+
+    # Unattended runs must not stop to ask, but must not hide it either.
+    if [ "${SILENT_MODE:-false}" = true ]; then
+        notify_warning "$HEAD
+
+Continuing on Wine $ver because this is a silent run. Re-run without --silent to pick an
+older Wine, or pass --wine /path/to/older/wine."
+        return 0
+    fi
+
+    if [ -z "$pkg_file" ]; then
+        notify_warning "$HEAD
+
+No older Wine package was found in the local package cache, so the installer cannot put
+one in place for you. Install an older Wine yourself and point the installer at it:
+
+    ./install.sh --wine /path/to/older/wine
+
+Known good: any release before $WINE_BROKEN_VERSIONS."
+        return 0
+    fi
+
+    notify_warning "$HEAD
+
+Wine $good_ver is sitting in the local package cache, and it reads the database fine."
+
+    if command -v gum &> /dev/null; then
+        choice=$(gum choose --header "How should the installer handle Wine $ver?" \
+            "Use Wine $good_ver alongside the system one (no root, nothing else changes)" \
+            "Downgrade the system package to $good_ver (needs root, affects everything)" \
+            "Continue on Wine $ver anyway") || choice=""
+    else
+        echo ""
+        echo "  1) Use Wine $good_ver alongside the system one (no root, nothing else changes)"
+        echo "  2) Downgrade the system package to $good_ver (needs root, affects everything)"
+        echo "  3) Continue on Wine $ver anyway"
+        read -rp "Choice [1]: " choice
+        case "${choice:-1}" in
+            1) choice="Use Wine" ;;
+            2) choice="Downgrade the system" ;;
+            *) choice="Continue" ;;
+        esac
+    fi
+
+    case "$choice" in
+        "Use Wine"*)
+            log_info "Unpacking Wine $good_ver to ~/.local/opt ..."
+            pinned=$(_pin_wine_from_pkg "$pkg_file" "$good_ver" || true)
+            if [ -z "$pinned" ]; then
+                notify_warning "Could not unpack $pkg_file.
+Continuing on Wine $ver -- the beatmap database will not survive a launch."
+                return 0
+            fi
+            WINE_SELECTION="$pinned"
+            WINE_BIN="$pinned"
+            export WINE="$WINE_BIN"
+            notify_user "osu! now runs on Wine $good_ver from:
+    $pinned
+
+The system Wine stays at $ver and keeps updating normally -- only osu! is pinned. The pin
+is stored with the rest of your settings, so --update keeps it. To undo it later, re-run
+the installer and pick the plain '$pkg' entry."
+            ;;
+        "Downgrade the system"*)
+            if _offer_system_downgrade "$pkg_file" "$good_ver" "$pkg"; then
+                WINE_BIN=$(resolve_wine_bin "$WINE_SELECTION")
+                export WINE="$WINE_BIN"
+            fi
+            ;;
+        *)
+            notify_warning "Continuing on Wine $ver.
+Back up $WINE_PREFIX/drive_c/users/*/AppData/Local/osu!/osu!.db before launching."
+            ;;
+    esac
+}
+
 setup_wine_prefix() {
     log_info "Setting up Wine Prefix at $WINE_PREFIX..."
     mkdir -p "$WINE_PREFIX"

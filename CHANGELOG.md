@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [v5.2.0] -- 2026-08-27
+
+### Added
+- **Wine releases that break the beatmap database are caught before they touch it**: on Wine 11.16 osu! cannot read `osu!.db`. It throws `OutOfMemoryException` while loading the file, renames the real database to `osu!.db.<ticks>.bak` and builds an empty one in its place -- on every launch, so a full song library comes up empty and stays that way until a backup is restored by hand. Neither the file nor its size is at fault: 11.16 rejects a 1 MB database it wrote itself moments earlier, while 11.15 reads a 32 MB one from the same prefix and the same file without complaint. The installer now checks the Wine version before the dependency step, asking the package manager which version it *would* install rather than waiting for it to land on disk (`pacman -Si`, `apt-cache policy`, `dnf info`, `xbps-query -R`); a Wine that is already present is read from its own `--version` instead.
+- **Two ways out of a broken Wine, neither of them silent**: a known-broken release is explained in terms of what happens to the database, and then offered either a known-good Wine unpacked from the local package cache into `~/.local/opt/wine-<version>` and used for osu! alone -- no root, the system package stays where it is and keeps updating -- or a downgrade of the system package, which additionally prints the `IgnorePkg` line to add so the next upgrade does not quietly undo it. `/etc/pacman.conf` is never edited by the installer: what a system holds back is the user's decision, not a game installer's. The cache search relies on pacman's file naming; elsewhere the situation is still explained and `--wine /path/to/older/wine` is named as the way to point at a working build. An accepted replacement is stored with the rest of the installer state, so `--update` keeps it.
+- **The launcher warns when it is about to start a broken Wine**: the version list is baked into the generated wrapper at install time, so the desktop entry and the file associations -- the paths an ordinary launch actually takes -- say what is about to happen before it happens. The launch itself is not blocked: the database is renamed rather than deleted, and a game that refuses to start is worse than a warning. `--launch` prints the same warning, and `--health-check` reports a broken Wine as a failed check rather than as a passing version line.
+
+Only 11.16 is currently on the list, and the list is static -- a later release carrying the same defect passes unremarked until it is added.
+
+---
+
 ## [v5.1.1] -- 2026-08-13
 
 ### Fixed
