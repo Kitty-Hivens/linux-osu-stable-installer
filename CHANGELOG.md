@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased]
+## [v5.2.2] -- 2026-09-09
 
 ### Fixed
 - **Wine 11.17 destroys the beatmap database exactly like 11.16, and was not on the list**: a 32 MB `osu!.db` that 11.15 had written minutes earlier was renamed to `osu!.db.<ticks>.bak` on the first launch under 11.17, and the song list came up empty. The defect outlived the release it first appeared in, so the guard now refuses both releases, and so does the version list baked into the generated wrapper. The fallback message offered "any release before" the single broken version as known good, which stops being true once the list holds more than one entry, so it names the broken releases instead.
