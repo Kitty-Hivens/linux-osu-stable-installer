@@ -1,6 +1,6 @@
 # osu! Linux Installer (Stable)
 
-**Version:** v5.2.0
+**Version:** v5.2.1
 **License:** MIT
 **Languages:** [English](README.md) | [Русский](README_RU.md)
 
@@ -21,6 +21,7 @@ Uses `gum` for a clean terminal (TUI) configuration dashboard. Fully unattended 
 - **System integration:** Desktop entry, MIME type registration for `.osz` / `.osk` / `.osr`, wrapper script.
 - **Convenience symlinks:** `~/osu/{Songs,Skins,Logs,Chat}` pointing into the Wine prefix for easy access.
 - **Beatmap importer:** double-click `.osz` / `.osk` / `.osr` to import into the running game; multi-file drops batch-import in a single in-game pass.
+- **osu!'s own updates:** under Wine the client cannot write over a DLL it has already loaded, so the update files it leaves waiting in `_pending` are installed before the game starts — otherwise an outdated `osu!auth.dll` ends up locking the client out of the servers.
 - **Maintenance commands:** update, uninstall, health check, config export/import, debug launch.
 
 ## System Requirements
