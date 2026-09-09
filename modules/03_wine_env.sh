@@ -165,7 +165,7 @@ one in place for you. Install an older Wine yourself and point the installer at 
 
     ./install.sh --wine /path/to/older/wine
 
-Known good: any release before $WINE_BROKEN_VERSIONS."
+Known broken: $WINE_BROKEN_VERSIONS."
         return 0
     fi
 

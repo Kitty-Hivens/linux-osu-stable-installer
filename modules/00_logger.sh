@@ -153,7 +153,9 @@ download_png() {
 # put back by hand. Verified by running 11.15 and 11.16 against the same prefix and the
 # same 32 MB database: 11.15 reads it, 11.16 fails within ten seconds. Neither the file
 # nor its size is at fault -- 11.16 rejects a 1 MB database it wrote itself moments earlier.
-WINE_BROKEN_VERSIONS="11.16"
+# 11.17 behaves exactly like 11.16: a 32 MB database that 11.15 had written minutes before
+# was renamed on the first launch under it, so the defect outlived the release it appeared in.
+WINE_BROKEN_VERSIONS="11.16 11.17"
 
 # Echo the bare version out of whatever reports one: "wine-11.16 (Staging)", "wine-11.16",
 # "11.16-1.1" all yield "11.16". Empty when the string carries no version at all.
