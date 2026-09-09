@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **osu! could not install its own updates, and the outdated auth module then locked the client out of the servers**: osu! downloads update files into a `_pending` directory beside the client and installs them on the next start, by writing over the file being replaced. Under Wine that write is refused with a sharing violation as soon as the target image is mapped, and `osu!auth.dll` is loaded before the updater reaches it, so every start logged `_pending\osu!auth.dll => osu!auth.dll: FAIL` and left the file where it was. The server turns away an outdated auth module, which left the client permanently offline with no way out: the update it needed was the one it could not install. The generated wrapper and `--launch` now move whatever waits in `_pending` into place before the client starts, while nothing has those files open. A file is checked for the DOS header first, so an interrupted download cannot be moved over a working DLL, and nothing is moved while a client is running. osu! verifies the result against its own manifest on the next check, so a file that should not have been installed is simply fetched again.
+
+---
+
 ## [v5.2.0] -- 2026-08-27
 
 ### Added

@@ -442,6 +442,10 @@ launch_osu() {
         exit 1
     fi
 
+    # osu! cannot install its own downloaded updates under Wine, so anything left waiting in
+    # _pending is put in place here, while nothing has those files mapped.
+    apply_pending_update "$OSU_LINUX"
+
     local WINE_VER
     WINE_VER=$("$WINE_BIN" --version 2>/dev/null || echo "version unknown")
 

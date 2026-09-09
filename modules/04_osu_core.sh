@@ -54,6 +54,60 @@ osu_expected_exe() {
     printf '%s' "$WINE_PREFIX/drive_c/users/$wine_user/AppData/Local/osu!/osu!.exe"
 }
 
+# PID of a running osu! client, empty when there is none. Wine sets the process name to
+# osu!.exe, so that is what identifies a real client. The fallback keeps the backslash of
+# the Windows path Wine passes, which no Linux path can contain.
+osu_client_pid() {
+    local p
+    p=$(pgrep -x 'osu!\.exe' 2>/dev/null | head -n1)
+    [ -n "$p" ] || p=$(pgrep -f 'osu!\\osu!\.exe' 2>/dev/null | head -n1)
+    printf '%s' "$p"
+}
+
+# osu! downloads its own updates into a _pending directory beside the client and installs
+# them on the next start, by writing over the file being replaced. Under Wine that write is
+# refused with a sharing violation as soon as the target is mapped, and osu!auth.dll is
+# loaded before the updater reaches it, so the swap fails on every start. An outdated auth
+# module is what the server turns away, which leaves the client offline with no way out:
+# the update it needs is the one it cannot install. Nothing holds those files before the
+# client starts, which is why the move belongs here. The generated wrapper carries the same
+# logic for the launcher path, and the two are meant to stay in step.
+apply_pending_update() {
+    local exe="$1" dir pending f name applied=0
+    dir=$(dirname "$exe")
+    pending="$dir/_pending"
+    [ -d "$pending" ] || return 0
+
+    # A file the running client has mapped is precisely the one that must not be swapped.
+    # That is the failure being worked around, and doing it under a live anti-cheat module
+    # is worse than leaving the update for the next start.
+    [ -z "$(osu_client_pid)" ] || return 0
+
+    for f in "$pending"/*; do
+        [ -f "$f" ] || continue
+        name=$(basename "$f")
+        # Everything osu! updates is a Windows executable. An interrupted download exists
+        # and is non-empty, and moving one over a working DLL would break the client.
+        case "${name,,}" in
+            *.dll|*.exe)
+                if ! is_pe "$f"; then
+                    log_warn "  Pending update $name is not a Windows executable, left for osu! to fetch again."
+                    continue
+                fi
+                ;;
+        esac
+        if mv -f "$f" "$dir/$name"; then
+            applied=$((applied + 1))
+            log_info "  Installed pending update: $name"
+        else
+            log_warn "  Could not move $name out of _pending."
+        fi
+    done
+
+    [ "$applied" -gt 0 ] && log_info "Installed $applied update file(s) osu! could not replace itself."
+    return 0
+}
+
 # Path of the self-extracting bootstrapper inside the prefix.
 OSU_BOOTSTRAP_EXE=""
 
@@ -441,6 +495,7 @@ warn_if_wine_breaks_db() {
 
 launch_osu() {
     dbg "osu!" "Launching..."
+    apply_pending_update
     warn_if_wine_breaks_db
     ensure_wayland_env
     local pre=""
@@ -458,6 +513,47 @@ BOOTSTRAP_LOCK_HELD=0
 _is_pe() {
     [ -s "$1" ] || return 1
     [ "$(head -c 2 "$1" 2>/dev/null)" = "MZ" ]
+}
+
+# osu! downloads its own updates into a _pending directory beside the client and installs
+# them on the next start, by writing over the file being replaced. Under Wine that write is
+# refused with a sharing violation as soon as the target is mapped, and osu!auth.dll is
+# loaded before the updater reaches it, so the swap fails on every start. An outdated auth
+# module is what the server turns away, which leaves the client offline with no way out:
+# the update it needs is the one it cannot install. Nothing holds those files before the
+# client starts, which is why the move happens here.
+apply_pending_update() {
+    local dir pending f name applied=0
+    dir=$(dirname "$OSU_LINUX")
+    pending="$dir/_pending"
+    [ -d "$pending" ] || return 0
+
+    # A file the running client has mapped is precisely the one that must not be swapped.
+    [ -z "$(osu_pid)" ] || return 0
+
+    for f in "$pending"/*; do
+        [ -f "$f" ] || continue
+        name=${f##*/}
+        # Everything osu! updates is a Windows executable. An interrupted download exists
+        # and is non-empty, and moving one over a working DLL would break the client.
+        case "${name,,}" in
+            *.dll|*.exe)
+                if ! _is_pe "$f"; then
+                    wlog "pending update $name is not a Windows executable, left for osu! to fetch again"
+                    continue
+                fi
+                ;;
+        esac
+        if mv -f "$f" "$dir/$name"; then
+            applied=$((applied + 1))
+            wlog "installed pending update: $name"
+        else
+            wlog "could not move $name out of _pending"
+        fi
+    done
+
+    [ "$applied" -gt 0 ] && note "osu!" "Installed $applied update file(s) osu! could not replace itself."
+    return 0
 }
 
 # Drop the bootstrap lock and the descriptor carrying it. Safe to call when no lock is held.
